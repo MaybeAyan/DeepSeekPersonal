@@ -1,0 +1,166 @@
+@import 'highlight.js/styles/github.css';
+
+:root {
+  font-family: 'SF Pro Text', 'SF Pro Display', -apple-system,
+    BlinkMacSystemFont, 'PingFang SC', 'Helvetica Neue', Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  font-size: 16px; /* 恢复到更合适的字体大小 */
+
+  color-scheme: light dark;
+  color: var(--app-text);
+  background-color: var(--app-background);
+
+  /* 改进字体渲染，使文字更平滑 */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-smooth: always;
+}
+
+/* 暗色模式下使用暗色代码高亮主题 */
+[data-mantine-color-scheme='dark'] {
+  --app-background: #1a1b1e;
+  --app-text: #c1c2c5;
+  --app-border: #2c2e33;
+  --message-user: #1e3a8a;
+  --message-assistant: #2c2e33;
+
+  /* 使用暗色代码高亮主题 */
+  @import 'highlight.js/styles/github-dark.css';
+}
+
+[data-mantine-color-scheme='light'] {
+  --app-background: #f8f9fa;
+  --app-text: rgba(0, 0, 0, 0.87);
+  --app-border: #eee;
+  --message-user: #e3f2fd;
+  --message-assistant: #fff;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden; /* 防止页面出现滚动条 */
+}
+
+/* 修改滚动条样式 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background-color: transparent;
+}
+
+/* 修改暗模式下的滚动条 */
+[data-mantine-color-scheme='dark'] ::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+.hljs code {
+  display: block;
+  padding: 14px;
+  overflow-x: auto;
+  line-height: 1.45;
+  font-family: 'SF Mono', SFMono-Regular, ui-monospace, Menlo, monospace;
+  font-size: 15px;
+}
+
+.inline-code {
+  border-radius: 3px;
+  font-family: 'SF Mono', SFMono-Regular, ui-monospace, Menlo, monospace;
+  font-size: 15px;
+  padding: 0.1em 0.3em;
+}
+
+/* 深色模式下的代码高亮样式 */
+[data-mantine-color-scheme='dark'] {
+  --app-background: #1a1b1e;
+  --app-text: #c1c2c5;
+  --app-border: #2c2e33;
+  --message-user: #1e3a8a;
+  --message-assistant: #2c2e33;
+}
+
+[data-mantine-color-scheme='light'] {
+  --app-background: #f8f9fa;
+  --app-text: rgba(0, 0, 0, 0.87);
+  --app-border: #eee;
+  --message-user: #e3f2fd;
+  --message-assistant: #fff;
+}
+
+/* 应用更平滑的字体渲染到所有文本 */
+p,
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+span,
+div,
+button,
+input,
+textarea,
+a {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* 调整文本间距，减轻视觉疲劳 */
+p,
+li {
+  letter-spacing: 0.01em;
+}
+
+/* 修改代码文本的渲染方式，使其更适合小字体显示 */
+code,
+pre,
+.hljs,
+.inline-code {
+  -webkit-font-smoothing: auto; /* 对于等宽字体，auto通常效果更好 */
+  text-rendering: optimizeSpeed; /* 优化速度而非清晰度，对代码更合适 */
+  font-family: 'SF Mono', SFMono-Regular, ui-monospace, Menlo, monospace;
+}
+
+/* 增加深色模式下文本的对比度，减轻眼睛疲劳 */
+[data-mantine-color-scheme='dark'] {
+  --app-text: #e6e6e6; /* 提高一点亮度，增加对比度 */
+}
+
+/* 调整消息文本的行高，增加可读性 */
+.message-text {
+  font-size: 16px;
+  line-height: 1.6;
+  letter-spacing: 0.01em;
+}
+
+/* 减小字体但保持清晰度 */
+.small-text {
+  font-size: 15px;
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: 0.01em;
+}
+
+/* 代码头部字体增大 */
+.code-header {
+  padding: 8px 14px; /* 增加内边距 */
+  border-top-left-radius: 8px;
+  border-top-right-radius: 8px;
+  font-family: 'SF Mono', SFMono-Regular, ui-monospace, Menlo, monospace;
+  font-size: 14px; /* 增大字体大小 */
+  display: flex;
+  justify-content: space-between;
+}

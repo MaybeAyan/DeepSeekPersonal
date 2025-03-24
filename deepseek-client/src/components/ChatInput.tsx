@@ -1,5 +1,5 @@
 import { FC, useState, KeyboardEvent } from 'react';
-import { Textarea, Button, Group, Box } from '@mantine/core';
+import { Textarea, Button, Group, Paper } from '@mantine/core';
 import { IconSend, IconPlayerStop } from '@tabler/icons-react';
 
 interface ChatInputProps {
@@ -30,7 +30,15 @@ export const ChatInput: FC<ChatInputProps> = ({
   };
 
   return (
-    <Box mt="md" style={{ marginTop: 'auto', padding: '16px 0 0 0' }}>
+    <Paper
+      p="xs"
+      radius="lg"
+      withBorder
+      style={{
+        backgroundColor: 'transparent',
+        borderColor: 'rgba(134, 142, 150, 0.2)',
+      }}
+    >
       <Textarea
         placeholder="输入消息，按 Enter 发送，Shift+Enter 换行..."
         value={input}
@@ -40,23 +48,28 @@ export const ChatInput: FC<ChatInputProps> = ({
         autosize
         minRows={2}
         maxRows={6}
-        mb="sm"
+        radius="md"
         style={{
           width: '100%',
-          borderRadius: '8px',
-          fontSize: '16px',
-          fontFamily:
-            'SF Pro Text, -apple-system, BlinkMacSystemFont, sans-serif',
+          fontSize: '15px',
+          border: 'none',
+        }}
+        styles={{
+          input: {
+            border: 'none',
+            backgroundColor: 'transparent',
+          },
         }}
       />
-      <Group justify="flex-end" gap="md">
+      <Group justify="flex-end" gap="md" mt="xs">
         {isLoading && (
           <Button
             color="red"
             onClick={onStopGeneration}
-            size="md"
+            size="sm"
             variant="light"
             rightSection={<IconPlayerStop size={16} />}
+            radius="md"
           >
             停止生成
           </Button>
@@ -65,12 +78,13 @@ export const ChatInput: FC<ChatInputProps> = ({
           onClick={handleSend}
           loading={isLoading}
           disabled={!input.trim()}
-          size="md"
+          size="sm"
           rightSection={<IconSend size={16} />}
+          radius="md"
         >
           发送
         </Button>
       </Group>
-    </Box>
+    </Paper>
   );
 };

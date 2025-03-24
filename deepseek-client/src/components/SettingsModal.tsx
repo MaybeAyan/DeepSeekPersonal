@@ -19,6 +19,7 @@ interface SettingsModalProps {
   onClose: () => void;
   settings: ChatSettings;
   onSettingsChange: (settings: Partial<ChatSettings>) => void;
+  isDark: boolean;
 }
 
 export const SettingsModal: FC<SettingsModalProps> = ({

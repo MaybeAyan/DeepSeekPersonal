@@ -532,10 +532,11 @@ export function Chat({ toggleColorScheme, colorScheme }: ChatProps) {
         {/* 弹性布局容器 - 包含侧边栏和聊天区域 */}
         <Box
           style={{
-            height: '100%',
+            height: 'calc(100vh - 100px)',
             display: 'flex',
             gap: 16,
             position: 'relative',
+            marginTop: 60,
           }}
         >
           {/* 侧边栏对话列表 */}

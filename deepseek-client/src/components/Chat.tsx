@@ -356,6 +356,7 @@ export function Chat({ toggleColorScheme, colorScheme }: ChatProps) {
 
       // 然后切换到新对话
       setActiveConversation(conversation);
+      setMessages(conversation.messages || []); // 确保加载新对话的消息
 
       // 在移动设备上选择对话后自动关闭侧边栏
       if (isMobile) {
@@ -753,7 +754,7 @@ export function Chat({ toggleColorScheme, colorScheme }: ChatProps) {
                 flexDirection: 'column',
                 overflow: 'hidden',
                 position: 'relative',
-                padding: '20px',
+                padding: '10px',
               }}
             >
               {messages.length === 0 ? (

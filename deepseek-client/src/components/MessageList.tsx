@@ -34,10 +34,10 @@ export const MessageList: FC<MessageListProps> = ({
       style={{ height: '100%', width: '100%', ...style }}
       viewportRef={viewport}
       offsetScrollbars
-      scrollbarSize={8} // 稍微增大滚动条尺寸
-      type="auto" // 确保使用auto模式
+      scrollbarSize={8}
+      type="auto"
     >
-      <Box p="md">
+      <Box>
         {messages.map((message) => (
           <ChatMessage key={message.id} message={message} isDark={isDark} />
         ))}

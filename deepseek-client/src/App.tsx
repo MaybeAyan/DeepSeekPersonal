@@ -1,7 +1,28 @@
-import { useState, useEffect } from 'react';
-import { MantineProvider, createTheme, ColorSchemeScript } from '@mantine/core';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import { Chat } from './components/Chat';
+import { useState } from 'react';
+import {
+  MantineProvider,
+  createTheme,
+  ColorSchemeScript,
+  MantineTheme,
+  localStorageColorSchemeManager,
+} from '@mantine/core';
+import {
+  BrowserRouter as Router,
+  Routes,
+  Route,
+  Navigate,
+} from 'react-router-dom';
+import { ChatPage } from './pages/ChatPage';
+import { Login } from './components/Login';
+import { ChatSettings } from './types';
+import { useAuth } from './features/auth/hooks/useAuth';
+import { useTheme } from './hooks/useTheme';
+import { UserProvider } from './contexts/UserContext';
+
+// 创建颜色方案管理器
+const colorSchemeManager = localStorageColorSchemeManager({
+  key: 'mantine-color-scheme',
+});
 
 // 创建更适合PC端的主题
 const theme = createTheme({
@@ -11,7 +32,8 @@ const theme = createTheme({
     fontFamily:
       'SF Pro Display, -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", Arial, sans-serif',
   },
-  fontSmoothing: 'antialiased', // 确保全局字体平滑
+  fontSmoothing: true,
+  // 暗色模式下的组件样式可以在这里配置
   components: {
     Button: {
       styles: () => ({
@@ -22,50 +44,38 @@ const theme = createTheme({
       }),
     },
     Paper: {
-      styles: (theme) => ({
+      styles: (theme: MantineTheme) => ({
         root: {
           boxShadow: '0 2px 12px rgba(0, 0, 0, 0.05)',
-          borderColor:
-            theme.colorScheme === 'dark'
-              ? theme.colors.dark[4]
-              : theme.colors.gray[2],
-          backgroundColor:
-            theme.colorScheme === 'dark' ? theme.colors.dark[7] : theme.white,
-          color:
-            theme.colorScheme === 'dark' ? theme.colors.dark[0] : theme.black,
-          '-webkit-font-smoothing': 'antialiased',
-          '-moz-osx-font-smoothing': 'grayscale',
-          'text-rendering': 'optimizeLegibility',
+          borderColor: theme.colors.dark[4],
+          backgroundColor: theme.white,
+          color: theme.black,
+          WebkitFontSmoothing: 'antialiased',
+          MozOsxFontSmoothing: 'grayscale',
+          textRendering: 'optimizeLegibility',
         },
       }),
     },
     AppShell: {
-      styles: (theme) => ({
+      styles: (theme: MantineTheme) => ({
         main: {
-          backgroundColor:
-            theme.colorScheme === 'dark'
-              ? theme.colors.dark[8]
-              : theme.colors.gray[0],
+          backgroundColor: theme.colors.gray[0],
         },
       }),
     },
     ActionIcon: {
-      styles: (theme) => ({
+      styles: (theme: MantineTheme) => ({
         root: {
           '&[data-variant="subtle"]:hover': {
-            backgroundColor:
-              theme.colorScheme === 'dark'
-                ? theme.colors.dark[5]
-                : theme.colors.gray[1],
+            backgroundColor: theme.colors.gray[1],
           },
         },
       }),
     },
     Text: {
-      styles: (theme) => ({
+      styles: (theme: MantineTheme) => ({
         root: {
-          color:
-            theme.colorScheme === 'dark' ? theme.colors.dark[0] : theme.black,
+          color: theme.black,
         },
       }),
     },
@@ -79,47 +89,62 @@ const theme = createTheme({
   },
 });
 
-function App() {
-  const [colorScheme, setColorScheme] = useState<'light' | 'dark'>('light');
+function AppContent() {
+  const { colorScheme, toggleColorScheme } = useTheme();
+  const { isLoggedIn, handleLogin, handleLogout } = useAuth();
+  const [settings, setSettings] = useState<ChatSettings>({
+    temperature: 0.7,
+    maxTokens: 500,
+    model: 'deepseek-chat',
+    streamMode: true,
+  });
 
-  useEffect(() => {
-    // 读取保存的主题设置
-    const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | null;
-    if (savedTheme) {
-      setColorScheme(savedTheme);
-    } else if (
-      window.matchMedia &&
-      window.matchMedia('(prefers-color-scheme: dark)').matches
-    ) {
-      // 使用系统首选项
-      setColorScheme('dark');
-    }
-  }, []);
-
-  const toggleColorScheme = (value?: 'light' | 'dark') => {
-    const newColorScheme = value || (colorScheme === 'dark' ? 'light' : 'dark');
-    setColorScheme(newColorScheme);
-    // 存储用户偏好
-    localStorage.setItem('theme', newColorScheme);
+  const updateSettings = (newSettings: Partial<ChatSettings>) => {
+    setSettings((prev) => ({ ...prev, ...newSettings }));
   };
 
   return (
+    <Routes>
+      <Route
+        path="/login"
+        element={
+          isLoggedIn ? <Navigate to="/" /> : <Login onLogin={handleLogin} />
+        }
+      />
+      <Route
+        path="/"
+        element={
+          isLoggedIn ? (
+            <ChatPage
+              toggleColorScheme={toggleColorScheme}
+              colorScheme={colorScheme}
+              onLogout={handleLogout}
+              settings={settings}
+              updateSettings={updateSettings}
+            />
+          ) : (
+            <Navigate to="/login" />
+          )
+        }
+      />
+    </Routes>
+  );
+}
+
+function App() {
+  return (
     <>
       <ColorSchemeScript />
-      <MantineProvider theme={{ ...theme, colorScheme }}>
-        <Router>
-          <Routes>
-            <Route
-              path="/"
-              element={
-                <Chat
-                  toggleColorScheme={toggleColorScheme}
-                  colorScheme={colorScheme}
-                />
-              }
-            />
-          </Routes>
-        </Router>
+      <MantineProvider
+        theme={theme}
+        defaultColorScheme="light"
+        colorSchemeManager={colorSchemeManager}
+      >
+        <UserProvider>
+          <Router>
+            <AppContent />
+          </Router>
+        </UserProvider>
       </MantineProvider>
     </>
   );

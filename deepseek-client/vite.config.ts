@@ -17,6 +17,10 @@ export default defineConfig({
         target: 'http://192.168.10.45:3000',
         changeOrigin: true,
       },
+      '/ai-npc': {
+        target: 'http://192.168.10.70:10010',
+        changeOrigin: true,
+      },
     },
   },
   resolve: {

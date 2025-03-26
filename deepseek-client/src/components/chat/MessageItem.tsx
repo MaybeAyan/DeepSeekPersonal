@@ -2,8 +2,8 @@
 import { FC, useMemo } from 'react';
 import { Box, Text, Avatar, Group, useMantineTheme } from '@mantine/core';
 import ReactMarkdown from 'react-markdown';
-import { CodeHighlight } from './CodeHighlight';
-import { ChatMessage as ChatMessageType } from '../types';
+import { CodeHighlight } from '../CodeHighlight';
+import { ChatMessage as ChatMessageType } from '../../types';
 import { IconRobot, IconUser } from '@tabler/icons-react';
 
 interface ChatMessageProps {
@@ -307,7 +307,7 @@ export const ChatMessage: FC<ChatMessageProps> = ({
       }}
     >
       <Group
-        position="apart"
+        align="apart"
         mb="xs"
         style={{ flexDirection: isUser ? 'row-reverse' : 'row' }}
       >

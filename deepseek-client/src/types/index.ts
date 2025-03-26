@@ -1,8 +1,18 @@
 export interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant' | 'system';
+  conversation_id?: string;
+  section_id?: string;
+  bot_id?: string;
+  chat_id?: string;
+  created_at?: number;
+  updated_at?: number;
+  audio?: string;
+  role: 'user' | 'assistant';
+  type?: string;
   content: string;
-  timestamp: number;
+  content_type?: string;
+  meta_data?: any;
+  reasoning_content?: string;
 }
 
 export interface Conversation {

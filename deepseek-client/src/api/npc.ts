@@ -46,55 +46,64 @@ let cachedBots: NpcBot[] | null = null;
 let lastFetchTime = 0;
 const CACHE_TTL = 60000; // 缓存有效期1分钟
 
+let isCurrentlyFetching = false; // 添加全局锁
+
 export const npcAPI = {
-  // 获取NPC机器人列表
-  getBotList: async (): Promise<NpcBot[]> => {
+  // 获取NPC机器人列表 - 添加强制刷新参数
+  getBotList: async (forceRefresh = false): Promise<NpcBot[]> => {
     const now = Date.now();
 
-    // 如果缓存存在且未过期，直接返回缓存
-    if (cachedBots && now - lastFetchTime < CACHE_TTL) {
+    // 全局请求锁，避免并发请求
+    if (isCurrentlyFetching) {
+      console.log('机器人列表正在获取中，跳过重复请求');
+
+      // 如果缓存存在返回缓存，否则等待当前请求完成
+      if (cachedBots) {
+        return cachedBots;
+      }
+
+      // 等待当前请求完成
+      await new Promise(resolve => setTimeout(resolve, 100));
+      return npcAPI.getBotList(forceRefresh);
+    }
+
+    // 如果缓存存在且未过期，并且不强制刷新，直接返回缓存
+    if (cachedBots && now - lastFetchTime < CACHE_TTL && !forceRefresh) {
       console.log('使用缓存的机器人列表，数量:', cachedBots.length);
       return cachedBots;
     }
 
     try {
+      isCurrentlyFetching = true; // 设置锁
       console.log('从服务器获取机器人列表');
+
       const response = await axios.get<NpcBotListResponse>(
-        '/ai-npc/npc/bot/list'
+        'http://192.168.10.70:10010/ai-npc/npc/bot/list'
       );
 
-      // 打印完整的响应数据进行调试
-      console.log('NPC机器人列表响应:', JSON.stringify(response.data, null, 2));
-
       if (response.data.code === 200) {
-        // 确保正确处理嵌套数据结构
         let botList: NpcBot[] = [];
 
         if (response.data.data?.items) {
-          // 如果是符合预期的嵌套结构
           botList = response.data.data.items;
-          console.log(botList);
         } else if (Array.isArray(response.data.data)) {
-          // 如果是直接数组
           botList = response.data.data;
-        } else {
-          console.error('未知的机器人列表数据结构:', response.data.data);
-          botList = [];
         }
-
-        console.log('处理后的机器人列表，数量:', botList.length);
 
         // 更新缓存
         cachedBots = botList;
         lastFetchTime = now;
+
+        console.log('机器人列表已更新，缓存数量:', botList.length);
         return botList;
-      } else {
-        console.error('获取机器人列表失败:', response.data.msg);
-        return [];
       }
+
+      throw new Error('获取机器人列表失败：' + response.data.msg);
     } catch (error) {
       console.error('获取机器人列表时发生错误:', error);
-      return [];
+      throw error;
+    } finally {
+      isCurrentlyFetching = false; // 释放锁
     }
   },
   // 获取会话消息记录
@@ -103,7 +112,7 @@ export const npcAPI = {
   ): Promise<ChatMessage[]> => {
     try {
       const response = await axios.get<ConversationMessagesResponse>(
-        `/ai-npc/npc/conversation/message/list?conversationId=${conversationId}`
+        `http://192.168.10.70:10010/ai-npc/npc/conversation/message/list?conversationId=${conversationId}`
       );
 
       if (response.data.code === 200 && response.data.data.items) {

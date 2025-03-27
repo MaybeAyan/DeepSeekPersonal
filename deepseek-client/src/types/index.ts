@@ -29,3 +29,17 @@ export interface ChatSettings {
   model: string;
   streamMode: boolean;
 }
+
+export interface Conversation {
+  id: string;
+  title: string;
+  messages: ChatMessage[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+// 扩展带有bot_id信息的会话类型
+export interface EnrichedConversation extends Conversation {
+  botIds?: string[];    // 会话中包含的所有bot_id
+  primaryBotId?: string; // 主要使用的bot_id
+}

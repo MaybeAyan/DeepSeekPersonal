@@ -25,7 +25,7 @@ export const useAuth = () => {
       try {
         const channel = 111; // 写死 channel
         const response = await axios.post<LoginResponse>(
-          '/ai-npc/api/user/login',
+          'http://192.168.10.70:10010/ai-npc/api/user/login',
           {
             phoneNo: phoneNo,
             code: code,

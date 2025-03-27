@@ -4,6 +4,8 @@ import { v4 as uuidv4 } from 'uuid';
 import axios from 'axios';
 import { useUser } from '../contexts/UserContext';
 
+let isConversationListFetching = false;
+
 // 服务器返回的对话列表类型
 interface ConversationResponse {
   id: number;
@@ -38,50 +40,33 @@ const useConversations = () => {
   const hasLoadedRef = useRef(false);
   const isComponentMountedRef = useRef(true);
 
+  // 从服务器获取指定对话的消息
   const loadConversationMessages = useCallback(
     async (conversationId: string) => {
-      if (!conversationId) {
-        console.warn('无效的会话ID，跳过请求');
-        return [];
-      }
-
       try {
         console.log(`加载会话 ${conversationId} 的消息...`);
         const response = await axios.get(
-          `/ai-npc/npc/conversation/message/list?conversationId=${conversationId}`
+          `http://192.168.10.70:10010/ai-npc/npc/conversation/message/list?conversationId=${conversationId}`
         );
 
-        // 如果组件已卸载，不更新状态
-        if (!isComponentMountedRef.current) return [];
+        if (response.data.code === 200) {
+          // 修改这里，确保正确提取 items 数组
+          const messagesData = response.data.data?.items || [];
 
-        if (response.data.code === 200 && response.data.data?.items) {
-          // 将服务器返回的消息转换为本地格式
-          const messages: ChatMessage[] = response.data.data.items.map(
-            (msg: any) => ({
-              id: msg.id || uuidv4(),
-              role: msg.role,
-              content: msg.content,
-              bot_id: msg.bot_id,
-              chat_id: msg.chat_id,
-              conversation_id: msg.conversation_id,
-              section_id: msg.section_id,
-            })
-          );
+          // 将接口返回的消息格式转换为应用内部使用的格式
+          const messages: ChatMessage[] = messagesData.map((msg: any) => ({
+            id: msg.id || uuidv4(),
+            role: msg.role,
+            content: msg.content,
+            bot_id: msg.bot_id,
+            chat_id: msg.chat_id,
+            conversation_id: msg.conversation_id,
+            section_id: msg.section_id,
+            created_at: msg.created_at,
+            updated_at: msg.updated_at,
+          }));
 
-          console.log(
-            `成功加载会话 ${conversationId} 的消息:`,
-            messages.length
-          );
-
-          // 更新对话的消息
-          // setConversations((prevConversations) =>
-          //   prevConversations.map((conv) =>
-          //     conv.id === conversationId
-          //       ? { ...conv, messages: messages }
-          //       : conv
-          //   )
-          // );
-
+          console.log(`成功加载会话 ${conversationId} 的消息:`, messages.length);
           return messages;
         } else {
           console.error('获取对话消息失败:', response.data?.msg || '未知错误');
@@ -95,33 +80,39 @@ const useConversations = () => {
     []
   );
 
-  // 从服务器获取对话列表 - 添加防抖和状态检查
+  // 从服务器获取对话列表
   const fetchConversations = useCallback(
-    async (force = false) => {
+    async (force = false, immediate = false) => {
       if (!userId) return;
 
-      // 防抖：如果上次请求时间距现在小于防抖时间且非强制刷新，则跳过
-      const now = Date.now();
-      if (
-        (!force && requestStatus.isListFetching) ||
-        now - requestStatus.lastListFetchTime < requestStatus.debounceTime
-      ) {
-        console.log('跳过重复请求或过快请求');
+      // 全局请求锁
+      if (isConversationListFetching && !force) {
+        console.log('会话列表正在获取中，跳过重复请求');
         return;
       }
 
-      // 设置全局请求状态
-      requestStatus.isListFetching = true;
-      requestStatus.lastListFetchTime = now;
+      const now = Date.now();
+      if (
+        !immediate && !force &&
+        (!initialized ||
+          requestStatus.isListFetching ||
+          now - requestStatus.lastListFetchTime < requestStatus.debounceTime)
+      ) {
+        console.log('跳过会话列表请求：防抖或未初始化');
+        return;
+      }
+
+
 
       try {
         console.log('获取对话列表...');
+        // 设置全局请求状态
+        isConversationListFetching = true;
+        requestStatus.isListFetching = true;
+        requestStatus.lastListFetchTime = now;
         const response = await axios.get<ConversationListResponse>(
-          `/ai-npc/npc/conversation/list?userId=${userId}`
+          `http://192.168.10.70:10010/ai-npc/npc/conversation/list?userId=${userId}`
         );
-
-        // 打印返回数据结构以便调试
-        console.log('对话列表响应:', response.data);
 
         // 如果组件已卸载，不更新状态
         if (!isComponentMountedRef.current) return;
@@ -151,21 +142,17 @@ const useConversations = () => {
               hasLoadedRef.current = true;
             }
           }
-        } else {
-          console.error('获取对话列表失败:', response.data.msg);
         }
       } catch (error) {
         console.error('获取对话列表时发生错误:', error);
       } finally {
         // 重置全局请求状态
+        isConversationListFetching = false;
         requestStatus.isListFetching = false;
-        if (isComponentMountedRef.current) {
-          setInitialized(true);
-        }
       }
     },
-    [userId, activeConversationId, loadConversationMessages]
-  ); // 依赖 activeConversationId 以确保其变化时可以正确处理
+    [userId, initialized]
+  );
 
   // 组件挂载时获取对话列表
   useEffect(() => {
@@ -208,7 +195,7 @@ const useConversations = () => {
     try {
       // 先通过 API 创建一个新对话
       const response = await axios.get<any>(
-        `/ai-npc/npc/conversation/create?userId=${userId}`
+        `http://192.168.10.70:10010/ai-npc/npc/conversation/create?userId=${userId}`
       );
 
       // 如果组件已卸载，不更新状态
@@ -268,7 +255,7 @@ const useConversations = () => {
 
       try {
         // 可以添加 API 调用来从服务器删除对话
-        // const response = await axios.delete(`/ai-npc/npc/conversation/delete?conversationId=${id}`);
+        // const response = await axios.delete(`http://192.168.10.70:10010/ai-npc/npc/conversation/delete?conversationId=${id}`);
 
         // 从本地状态中删除对话
         setConversations((prev) => {

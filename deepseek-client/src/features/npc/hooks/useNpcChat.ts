@@ -1,6 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { NpcBot } from '../../../api';
 import { useUser } from '../../../contexts/UserContext';
 
 export function useNpcChat() {
@@ -15,7 +14,7 @@ export function useNpcChat() {
   const { userId } = useUser();
 
   const handleSendToNpc = useCallback(
-    async (content: string, botId: string, conversationId: string) => {
+    async (content: string, botId: string, conversationId: string, onMessageUpdate?: (content: string, isCompleted: boolean) => void) => {
       if (npcLoading) return;
 
       if (!conversationId || !botId) {
@@ -41,17 +40,20 @@ export function useNpcChat() {
         const assistantMessageId = uuidv4();
         const assistantMessage = {
           id: assistantMessageId,
-          content: '正在思考中...', // 初始内容为空
+          content: '正在思考中...',
           role: 'assistant' as const,
+          bot_id: botId,
         };
 
         setNpcMessages((prev) => [...prev, assistantMessage]);
-        const url = `/ai-npc/npc/streamChat/create?content=${encodeURIComponent(
+        const url = `http://192.168.10.70:10010/ai-npc/npc/streamChat/create?content=${encodeURIComponent(
           content
         )}&conversationId=${conversationId}&userID=${userId}&botID=${botId}`;
 
         // 使用 EventSource 处理 SSE 流
         eventSource = new EventSource(url); // 初始化局部变量
+
+        let accumulatedContent = '';
 
         eventSource.onmessage = (event) => {
           try {
@@ -59,69 +61,57 @@ export function useNpcChat() {
 
             if (eventData.event === 'conversation.message.delta') {
               if (eventData.message && eventData.message.content) {
+                const delta = eventData.message.content;
+                accumulatedContent += delta;
+
+                // 更新本地消息
                 setNpcMessages((prev) =>
                   prev.map((msg) =>
                     msg.id === assistantMessageId
-                      ? {
-                          ...msg,
-                          content: msg.content + eventData.message.content,
-                        }
+                      ? { ...msg, content: accumulatedContent }
                       : msg
                   )
                 );
+
+                // 调用外部回调，通知Chat组件更新
+                if (onMessageUpdate) {
+                  onMessageUpdate(accumulatedContent, false);
+                }
               }
-            } else if (eventData.event === 'conversation.message.completed') {
-              // 完整的消息内容
-              if (
-                eventData.message &&
-                eventData.message.content &&
-                eventData.message.type === 'answer'
-              ) {
-                setNpcMessages((prev) =>
-                  prev.map((msg) =>
-                    msg.id === assistantMessageId
-                      ? { ...msg, content: eventData.message.content }
-                      : msg
-                  )
-                );
+            } else if (eventData.event === 'conversation.message.completed' ||
+              eventData.event === 'conversation.chat.completed' ||
+              eventData.done === true) {
+              // 流式响应完成，关闭连接
+              if (eventSource) {
+                eventSource.close();
+                setNpcLoading(false);
+                abortControllerRef.current = null;
+
+                // 调用外部回调，标记完成
+                if (onMessageUpdate) {
+                  onMessageUpdate(accumulatedContent, true);
+                }
               }
-            } else if (eventData.event === 'conversation.chat.completed') {
-              if (eventData.chat && eventData.chat.conversation_id) {
-                setNpcConversationId(eventData.chat.conversation_id);
-              }
-            } else if (eventData.done === true) {
-              // 所有数据接收完毕，关闭连接
-              eventSource?.close();
-              setNpcLoading(false);
             }
           } catch (error) {
-            console.error('解析SSE数据出错:', error, event.data);
-            setNpcError('解析SSE数据出错');
-            eventSource?.close(); // 确保关闭
+            console.error('处理事件流数据时出错:', error);
+          }
+        };
+
+        // 保存中断控制器
+        abortControllerRef.current = () => {
+          if (eventSource) {
+            eventSource.close();
             setNpcLoading(false);
           }
         };
 
-        eventSource.onerror = (error) => {
-          console.error('EventSource error:', error);
-          setNpcError('EventSource error');
-          eventSource?.close(); // 确保关闭
-          setNpcLoading(false);
-        };
-
-        // 中止请求
-        abortControllerRef.current = () => {
-          eventSource?.close(); // 确保关闭
-          setNpcLoading(false);
-        };
       } catch (error: any) {
-        console.error('NPC聊天错误:', error);
-        setNpcError('与AI助手对话时发生错误');
-        eventSource?.close(); // 确保关闭
+        setNpcError(error.message || '请求失败');
         setNpcLoading(false);
       }
     },
-    []
+    [userId, npcLoading, setNpcError, setNpcMessages, setNpcLoading]
   );
 
   const handleStopNpcGeneration = useCallback(() => {

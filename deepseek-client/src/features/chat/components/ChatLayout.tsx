@@ -67,7 +67,6 @@ export const ChatLayout = React.memo(function ChatLayout({
   stopGeneration,
   createConversation,
   setSidebarVisible,
-  setLogoutModalOpen,
 }: ChatLayoutProps) {
   return (
     <Box

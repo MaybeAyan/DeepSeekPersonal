@@ -6,12 +6,14 @@ interface ChatInputProps {
   onSendMessage: (message: string) => void;
   isLoading: boolean;
   onStopGeneration: () => void;
+  disabled?: boolean;
 }
 
 export const ChatInput: FC<ChatInputProps> = ({
   onSendMessage,
   isLoading,
   onStopGeneration,
+  disabled,
 }) => {
   const [input, setInput] = useState('');
 
@@ -44,7 +46,7 @@ export const ChatInput: FC<ChatInputProps> = ({
         value={input}
         onChange={(e) => setInput(e.currentTarget.value)}
         onKeyDown={handleKeyDown}
-        disabled={isLoading}
+        disabled={disabled}
         autosize
         minRows={2}
         maxRows={6}

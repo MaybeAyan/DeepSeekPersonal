@@ -17,7 +17,7 @@ import { IconSettings, IconInfoCircle } from '@tabler/icons-react';
 interface SettingsModalProps {
   opened: boolean;
   onClose: () => void;
-  settings: ChatSettings;
+  settings?: ChatSettings;
   onSettingsChange: (settings: Partial<ChatSettings>) => void;
   isDark: boolean;
 }
@@ -52,7 +52,7 @@ export const SettingsModal: FC<SettingsModalProps> = ({
         <Box>
           <Group mb={5} align="center">
             <Text size="sm" fw={500}>
-              温度 ({settings.temperature})
+              温度 ({settings?.temperature})
             </Text>
             <Tooltip
               label="较高的值使输出更随机多样，较低的值使输出更确定和集中"
@@ -66,13 +66,8 @@ export const SettingsModal: FC<SettingsModalProps> = ({
             min={0}
             max={1}
             step={0.1}
-            value={settings.temperature}
+            value={settings?.temperature}
             onChange={(value) => onSettingsChange({ temperature: value })}
-            // marks={[
-            //   { value: 0, label: '精确' },
-            //   { value: 0.5, label: '平衡' },
-            //   { value: 1, label: '创意' },
-            // ]}
           />
         </Box>
 
@@ -94,7 +89,7 @@ export const SettingsModal: FC<SettingsModalProps> = ({
               </Group>
             }
             data={models}
-            value={settings.model}
+            value={settings?.model}
             onChange={(value) =>
               onSettingsChange({ model: value || 'deepseek-chat' })
             }
@@ -116,7 +111,7 @@ export const SettingsModal: FC<SettingsModalProps> = ({
                 </Tooltip>
               </Group>
             }
-            value={settings.maxTokens}
+            value={settings?.maxTokens}
             onChange={(val) =>
               onSettingsChange({
                 maxTokens: val !== '' ? Number(val) : 500,
@@ -143,7 +138,7 @@ export const SettingsModal: FC<SettingsModalProps> = ({
             </Tooltip>
           </Group>
           <SegmentedControl
-            value={settings.streamMode ? 'stream' : 'normal'}
+            value={settings?.streamMode ? 'stream' : 'normal'}
             onChange={(value) =>
               onSettingsChange({ streamMode: value === 'stream' })
             }

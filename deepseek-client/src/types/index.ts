@@ -13,6 +13,9 @@ export interface ChatMessage {
   content_type?: string;
   meta_data?: any;
   reasoning_content?: string;
+
+  // 自定义属性
+  isThinking?: boolean;
 }
 
 export interface Conversation {
@@ -40,6 +43,6 @@ export interface Conversation {
 
 // 扩展带有bot_id信息的会话类型
 export interface EnrichedConversation extends Conversation {
-  botIds?: string[];    // 会话中包含的所有bot_id
+  botIds?: string[]; // 会话中包含的所有bot_id
   primaryBotId?: string; // 主要使用的bot_id
 }

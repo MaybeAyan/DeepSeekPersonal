@@ -4,8 +4,6 @@ import { v4 as uuidv4 } from 'uuid';
 import axios from 'axios';
 import { useUser } from '../contexts/UserContext';
 
-let isConversationListFetching = false;
-
 // 服务器返回的对话列表类型
 interface ConversationResponse {
   id: number;
@@ -21,11 +19,13 @@ interface ConversationListResponse {
   data: ConversationResponse[];
 }
 
-// 使用一个单例模式来记录全局请求状态
-const requestStatus = {
-  isListFetching: false,
-  lastListFetchTime: 0,
-  debounceTime: 500, // 防抖时间：500ms
+// 全局单例锁
+const GLOBAL_STATE = {
+  isFetching: false,
+  lastFetchTime: 0,
+  requestId: 0,
+  initialized: false,
+  debug: true,
 };
 
 const useConversations = () => {
@@ -54,19 +54,24 @@ const useConversations = () => {
           const messagesData = response.data.data?.items || [];
 
           // 将接口返回的消息格式转换为应用内部使用的格式
-          const messages: ChatMessage[] = messagesData.map((msg: any) => ({
-            id: msg.id || uuidv4(),
-            role: msg.role,
-            content: msg.content,
-            bot_id: msg.bot_id,
-            chat_id: msg.chat_id,
-            conversation_id: msg.conversation_id,
-            section_id: msg.section_id,
-            created_at: msg.created_at,
-            updated_at: msg.updated_at,
-          }));
+          const messages: ChatMessage[] = messagesData.map(
+            (msg: ChatMessage) => ({
+              id: msg.id || uuidv4(),
+              role: msg.role,
+              content: msg.content,
+              bot_id: msg.bot_id,
+              chat_id: msg.chat_id,
+              conversation_id: msg.conversation_id,
+              section_id: msg.section_id,
+              created_at: msg.created_at,
+              updated_at: msg.updated_at,
+            })
+          );
 
-          console.log(`成功加载会话 ${conversationId} 的消息:`, messages.length);
+          console.log(
+            `成功加载会话 ${conversationId} 的消息:`,
+            messages.length
+          );
           return messages;
         } else {
           console.error('获取对话消息失败:', response.data?.msg || '未知错误');
@@ -85,40 +90,57 @@ const useConversations = () => {
     async (force = false, immediate = false) => {
       if (!userId) return;
 
-      // 全局请求锁
-      if (isConversationListFetching && !force) {
-        console.log('会话列表正在获取中，跳过重复请求');
+      // 直接打印请求状态便于调试
+      if (GLOBAL_STATE.debug) {
+        console.log('fetchConversations 被调用:', {
+          force,
+          immediate,
+          isGlobalFetching: GLOBAL_STATE.isFetching,
+          isInitialized: GLOBAL_STATE.initialized,
+          lastFetchTime: new Date(GLOBAL_STATE.lastFetchTime).toISOString(),
+          requestId: GLOBAL_STATE.requestId,
+        });
+      }
+
+      if (GLOBAL_STATE.initialized && !force) {
+        console.log('⚠️ 全局已初始化，跳过重复请求');
+        if (!initialized) {
+          setInitialized(true);
+        }
+        return conversations;
+      }
+
+      // 如果正在获取中且不是强制获取，跳过
+      if (GLOBAL_STATE.isFetching && !force) {
+        console.log('⚠️ 跳过请求: 另一个请求正在进行中');
         return;
       }
 
-      const now = Date.now();
-      if (
-        !immediate && !force &&
-        (!initialized ||
-          requestStatus.isListFetching ||
-          now - requestStatus.lastListFetchTime < requestStatus.debounceTime)
-      ) {
-        console.log('跳过会话列表请求：防抖或未初始化');
-        return;
-      }
-
-
+      // 递增请求ID
+      const currentRequestId = ++GLOBAL_STATE.requestId;
 
       try {
-        console.log('获取对话列表...');
+        console.log(`🚀 开始获取对话列表 (请求ID: ${currentRequestId})`);
         // 设置全局请求状态
-        isConversationListFetching = true;
-        requestStatus.isListFetching = true;
-        requestStatus.lastListFetchTime = now;
+        GLOBAL_STATE.isFetching = true;
+        GLOBAL_STATE.lastFetchTime = Date.now();
+
         const response = await axios.get<ConversationListResponse>(
           `http://192.168.10.70:10010/ai-npc/npc/conversation/list?userId=${userId}`
         );
+
+        // 如果当前请求不是最新的请求，则忽略结果
+        if (currentRequestId !== GLOBAL_STATE.requestId) {
+          console.log(`⚠️ 忽略过时的请求结果 (ID: ${currentRequestId})`);
+          return;
+        }
 
         // 如果组件已卸载，不更新状态
         if (!isComponentMountedRef.current) return;
 
         if (response.data.code === 200 && Array.isArray(response.data.data)) {
-          // 将服务器返回的对话数据转换为本地格式
+          console.log('服务器返回的原始数据:', response.data.data);
+
           const conversationsData: Conversation[] = response.data.data.map(
             (conv) => ({
               id: conv.conversationId,
@@ -132,26 +154,37 @@ const useConversations = () => {
           console.log('转换后的对话列表:', conversationsData);
           setConversations(conversationsData);
 
-          // 只在没有活跃对话时设置第一个为活跃
-          if (conversationsData.length > 0 && !activeConversationId) {
-            setActiveConversationId(conversationsData[0].id);
+          // 确保有会话选中
+          if (conversationsData.length > 0) {
+            // 如果没有活跃对话，选择第一个
+            if (!activeConversationId) {
+              console.log('设置活跃对话:', conversationsData[0].id);
+              setActiveConversationId(conversationsData[0].id);
 
-            // 自动加载第一个对话的消息
-            if (!hasLoadedRef.current) {
-              loadConversationMessages(conversationsData[0].id);
-              hasLoadedRef.current = true;
+              // 自动加载第一个对话的消息
+              if (!hasLoadedRef.current) {
+                console.log('自动加载第一个对话的消息');
+                loadConversationMessages(conversationsData[0].id);
+                hasLoadedRef.current = true;
+              }
             }
+          }
+
+          // 标记初始化完成
+          if (!initialized) {
+            setInitialized(true);
           }
         }
       } catch (error) {
         console.error('获取对话列表时发生错误:', error);
       } finally {
-        // 重置全局请求状态
-        isConversationListFetching = false;
-        requestStatus.isListFetching = false;
+        // 只有当这是最新的请求时，才重置请求状态
+        if (currentRequestId === GLOBAL_STATE.requestId) {
+          GLOBAL_STATE.isFetching = false;
+        }
       }
     },
-    [userId, initialized]
+    [userId, initialized, loadConversationMessages, activeConversationId]
   );
 
   // 组件挂载时获取对话列表
@@ -159,31 +192,23 @@ const useConversations = () => {
     // 重置组件挂载状态
     isComponentMountedRef.current = true;
 
-    const initializeConversations = async () => {
-      try {
-        await fetchConversations();
-      } catch (error) {
-        console.error('初始化对话列表失败:', error);
-      } finally {
-        // 无论成功失败，都设置为已初始化
-        if (isComponentMountedRef.current) {
-          setInitialized(true);
-        }
+    if (GLOBAL_STATE.initialized) {
+      console.log('全局已初始化，跳过组件挂载初始化');
+      if (!initialized) {
+        setInitialized(true);
       }
-    };
+      return;
+    }
 
     if (userId) {
-      initializeConversations();
-    } else {
-      // 如果没有用户ID，也标记为已初始化
-      setInitialized(true);
+      fetchConversations(true, true);
     }
 
     // 清理函数
     return () => {
       isComponentMountedRef.current = false;
     };
-  }, [fetchConversations, userId]);
+  }, []);
 
   // 创建新对话
   const createConversation = useCallback(async () => {

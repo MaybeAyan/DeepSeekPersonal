@@ -1,11 +1,4 @@
-import {
-  useState,
-  useRef,
-  useEffect,
-  useCallback,
-  useMemo,
-  useLayoutEffect,
-} from 'react';
+import React, { memo, useEffect } from 'react';
 import {
   AppShell,
   Container,
@@ -13,32 +6,25 @@ import {
   Box,
   Title,
   Group,
-  Text,
   ActionIcon,
   Button,
-  useMantineTheme,
-  ScrollArea,
-  Burger,
   Overlay,
   Transition,
   Stack,
   Modal,
   LoadingOverlay,
   Tooltip,
+  Menu,
+  Text,
+  Avatar,
+  ScrollArea,
+  Burger,
 } from '@mantine/core';
-import { useMediaQuery } from '@mantine/hooks';
-import { v4 as uuidv4 } from 'uuid';
-import { MessageList } from './chat/MessageList';
-import { ChatInput } from './chat/ChatInput';
-import { ChatMessage, ChatSettings, Conversation } from '../types';
-import { SettingsModal } from './SettingsModal';
-import useConversations from '../hooks/useConversations';
 import {
   IconBrandOpenai,
   IconEdit,
   IconTrash,
   IconPlus,
-  IconSettings,
   IconSun,
   IconMoon,
   IconMessage,
@@ -46,18 +32,33 @@ import {
   IconLogout,
   IconRobot,
   IconX,
+  IconPhotoEdit,
+  IconPhoto,
 } from '@tabler/icons-react';
-import { extractBotIds, getPrimaryBotId } from '../utils/conversation';
-import { npcAPI } from '../api';
-import { Avatar } from '@mantine/core';
-import { processGroupChatHistory } from '../utils/chatUtils';
+import { MessageList } from './chat/MessageList';
+import { ChatInput } from './chat/ChatInput';
+import { SettingsModal } from './SettingsModal';
+import { NpcBotList } from './npc/NpcBotList';
+import { ImageGallery } from './chat/ImageGallery';
+import { ChatMessage, ChatSettings } from '../types';
+import { NpcBot, npcAPI } from '../api';
+
+// 导入自定义钩子
+import useConversations from '../hooks/useConversations';
+import { useChatBackground } from '../hooks/useChatBackground';
+import { useChatUI } from '../hooks/useChatUI';
+import { useMessageHandling } from '../hooks/useMessageHandling';
+import { useBotData } from '../hooks/useBotData';
+import { useAppInitialization } from '../hooks/useAppInitialization';
+import { useChatConversation } from '../hooks/useChatConversation';
+
 interface ChatProps {
   toggleColorScheme: (value?: 'light' | 'dark') => void;
   colorScheme: 'light' | 'dark';
   onLogout: () => void;
   settings?: ChatSettings;
   updateSettings?: (settings: Partial<ChatSettings>) => void;
-  customMessageRenderer?: (message: any) => React.ReactNode; // 自定义消息渲染器
+  customMessageRenderer?: (message: ChatMessage) => React.ReactNode;
   sendMessageToNpc?: (
     content: string,
     botId: string,
@@ -76,41 +77,26 @@ export function Chat({
   customMessageRenderer,
   sendMessageToNpc,
 }: ChatProps) {
-  // 状态管理
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [settingsOpened, setSettingsOpened] = useState(false);
-  const [activeConversation, setActiveConversation] =
-    useState<Conversation | null>(null);
-  const [sidebarVisible, setSidebarVisible] = useState(true);
-  const [isInitialLoad, setIsInitialLoad] = useState(true);
-  const [appReady, setAppReady] = useState(false);
-  // 控制退出确认弹窗
-  const [logoutModalOpen, setLogoutModalOpen] = useState(false);
+  // 使用UI状态钩子
+  const {
+    sidebarVisible,
+    setSidebarVisible,
+    logoutModalOpen,
+    setLogoutModalOpen,
+    settingsOpened,
+    setSettingsOpened,
+    selectedBot,
+    handleSelectBot,
+    isDark,
+    isMobile,
+    isTablet,
+    handleLogoutConfirm,
+  } = useChatUI(colorScheme);
 
-  const [botAvatars, setBotAvatars] = useState<Record<string, string>>({});
-  const [botNames, setBotNames] = useState<Record<string, string>>({});
+  // 为isLoading状态创建独立的状态管理
+  const [isLoading, setIsLoading] = React.useState(false);
 
-  // 1. 在组件顶部定义所需的状态和引用
-  const [pendingBots, setPendingBots] = useState<string[]>([]);
-  const [currentReplyingBot, setCurrentReplyingBot] = useState<string | null>(
-    null
-  );
-  const completedBotsRef = useRef<Set<string>>(new Set());
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
-  const handleBotReplyRef = useRef<Function | null>(null);
-  const messagesRef = useRef<ChatMessage[]>([]);
-  const activeConversationRef = useRef<Conversation | null>(null);
-  const lastUserMessageRef = useRef<string>('');
-
-  const [selectedBot, setSelectedBot] = useState<string | null>(null);
-
-  const handleSelectBot = useCallback((botId: string) => {
-    // 如果已选择，则取消选择；否则，选择该机器人
-    setSelectedBot((prev) => (prev === botId ? null : botId));
-  }, []);
-
-  // 会话管理
+  // 使用会话数据钩子
   const {
     conversations,
     createConversation,
@@ -121,614 +107,90 @@ export function Chat({
     fetchConversations,
   } = useConversations();
 
-  useEffect(() => {
-    messagesRef.current = messages;
-  }, [messages]);
+  // 使用机器人数据钩子
+  const {
+    botAvatars,
+    botNames,
+    botDecs,
+    nameToIdMap,
+    loadBotData,
+    updateBotData,
+  } = useBotData();
 
-  useEffect(() => {
-    activeConversationRef.current = activeConversation;
-  }, [activeConversation]);
+  // 使用背景图片钩子
+  const {
+    chatBgImage,
+    handleBgImageSelect,
+    handleRemoveBgImage,
+    handleBgImageUpload,
+  } = useChatBackground();
 
-  const handleBotReply = useCallback(
-    async (botId: string, content: string, conversationId: string) => {
-      if (!botId || !content || !conversationId) {
-        console.error('回复参数不完整', { botId, conversationId });
-        return;
-      }
-
-      // 检查该机器人是否已经回复过这个问题
-      if (completedBotsRef.current.has(botId)) {
-        console.warn(`机器人 ${botId} 已经回复过此问题，跳过`);
-
-        // 直接处理下一个机器人
-        handleBotReplyCompleted(botId);
-        return;
-      }
-
-      console.log(`开始获取机器人 ${botId} 的回复`);
-      setCurrentReplyingBot(botId);
-      setIsLoading(true);
-
-      // 创建新的机器人回复消息
-      const assistantMessageId = uuidv4();
-      const assistantMessage: ChatMessage = {
-        id: assistantMessageId,
-        role: 'assistant',
-        content: '',
-        created_at: Date.now(),
-        bot_id: botId,
-      };
-
-      // 添加到消息列表
-      setMessages((prev) => [...prev, assistantMessage]);
-
-      const timeoutId = setTimeout(() => {
-        if (!completedBotsRef.current.has(botId)) {
-          console.warn(`机器人 ${botId} 回复超时，强制标记为完成`);
-          completedBotsRef.current.add(botId);
-          handleBotReplyCompleted(botId);
-        }
-      }, 30000); // 30秒超时保护
-
-      // 添加内容停滞检测
-      const contentStabilityCheckerId = setInterval(() => {
-        const currentMessages = messagesRef.current;
-        const currentMessage = currentMessages.find(
-          (m) => m.id === assistantMessageId
-        );
-
-        if (
-          currentMessage &&
-          currentMessage.content &&
-          currentMessage.content.length > 0
-        ) {
-          // 内容已经开始生成，可以清除这个计时器
-          clearInterval(contentStabilityCheckerId);
-        }
-      }, 5000); // 每5秒检查一次
-
-      // 调用API获取回复
-      if (sendMessageToNpc) {
-        let hasCompleted = false; // 本地标记，防止多次触发
-        sendMessageToNpc(
-          content,
-          botId,
-          conversationId,
-          (updatedContent, isCompleted) => {
-            // 更新消息内容
-            setMessages((prev) =>
-              prev.map((msg) =>
-                msg.id === assistantMessageId
-                  ? { ...msg, content: updatedContent }
-                  : msg
-              )
-            );
-            if (
-              isCompleted &&
-              !hasCompleted &&
-              !completedBotsRef.current.has(botId)
-            ) {
-              console.log(`机器人 ${botId} 回复已完成，添加到已完成集合`);
-              hasCompleted = true; // 本地标记已完成
-              completedBotsRef.current.add(botId); // 记录此机器人已完成
-              clearTimeout(timeoutId); // 清除超时保护
-              clearInterval(contentStabilityCheckerId); // 清除内容稳定性检查
-              handleBotReplyCompleted(botId); // 触发完成处理
-            }
-          }
-        );
-      } else {
-        console.error('sendMessageToNpc 函数不可用');
-        setIsLoading(false);
-        clearTimeout(timeoutId);
-        clearInterval(contentStabilityCheckerId);
-      }
-
-      return () => {
-        clearTimeout(timeoutId);
-        clearInterval(contentStabilityCheckerId);
-      };
-    },
-    [sendMessageToNpc]
-  );
-
-  // 修改 handleBotReplyCompleted 函数，增强队列处理的可靠性
-  const handleBotReplyCompleted = useCallback(
-    (completedBotId: string) => {
-      console.log(
-        `机器人 ${completedBotId} 回复完成，准备处理下一个, 当前队列:`,
-        pendingBots
-      );
-
-      // 重置当前回复的机器人
-      setCurrentReplyingBot(null);
-      setIsLoading(false); // 临时设置为非加载状态，避免UI卡住
-
-      // 获取当前队列的快照，避免状态更新的竞态条件
-      const currentPendingBots = [...pendingBots];
-
-      // 检查是否还有等待回复的机器人
-      if (currentPendingBots.length > 0) {
-        // 获取下一个待处理的机器人
-        const nextBot = currentPendingBots[0];
-
-        // 检查下一个机器人是否已经回复过
-        if (completedBotsRef.current.has(nextBot)) {
-          console.warn(
-            `下一个机器人 ${nextBot} 已经回复过，跳过并尝试后续机器人`
-          );
-
-          // 更新队列，移除已处理的机器人
-          setPendingBots(currentPendingBots.slice(1));
-
-          // 立即处理下一个机器人
-          if (currentPendingBots.length > 1) {
-            setTimeout(() => handleBotReplyCompleted(nextBot), 0);
-          }
-          return;
-        }
-
-        console.log(
-          `处理下一个机器人: ${nextBot}, 剩余队列: ${currentPendingBots
-            .slice(1)
-            .join(',')}`
-        );
-
-        // 更新等待队列 - 移除将要处理的机器人
-        setPendingBots(currentPendingBots.slice(1));
-
-        const currentConversation = activeConversationRef.current;
-        const userContent = lastUserMessageRef.current;
-
-        // 延迟处理下一个机器人，确保状态已更新
-        setTimeout(() => {
-          if (currentConversation && nextBot) {
-            console.log(`开始调用下一个机器人 ${nextBot} 的回复函数`);
-
-            if (handleBotReplyRef.current) {
-              // 通过引用调用函数，避免循环依赖
-              handleBotReplyRef.current(
-                nextBot,
-                userContent,
-                currentConversation.id
-              );
-            } else {
-              // 如果引用不可用，直接调用
-              console.warn('handleBotReplyRef不可用，直接调用handleBotReply');
-              handleBotReply(nextBot, userContent, currentConversation.id);
-            }
-          } else {
-            console.error('无法处理下一个机器人，参数不完整', {
-              conversation: !!currentConversation,
-              nextBot,
-              pendingBots: currentPendingBots,
-            });
-          }
-        }, 1000);
-      } else {
-        // 所有机器人都已回复完毕
-        console.log('所有机器人都已完成回复，队列为空');
-        setIsLoading(false);
-
-        // 更新会话信息
-        const currentConversation = activeConversationRef.current;
-        if (currentConversation) {
-          updateConversation(currentConversation.id, {
-            updatedAt: Date.now(),
-          });
-        }
-      }
-    },
-    [handleBotReply, pendingBots, updateConversation]
-  );
-
-  // 5. 用户发送消息处理函数
-  const handleSendMessage = useCallback(
-    async (content: string) => {
-      if (isLoading || !activeConversation) return;
-
-      // 保存用户消息内容到引用，供后续机器人回复使用
-      lastUserMessageRef.current = content;
-
-      // 获取所有可用机器人
-      try {
-        const availableBots = await npcAPI.getBotList();
-
-        // 过滤出有效的机器人ID
-        let botIds = availableBots
-          .filter((bot) => bot.bot_id)
-          .map((bot) => bot.bot_id);
-
-        // 确保机器人ID不重复
-        botIds = [...new Set(botIds)];
-
-        if (selectedBot) {
-          console.log(`只让指定机器人回复: ${selectedBot}`);
-          botIds = [selectedBot];
-        } else {
-          console.log(`将依次让这些机器人回复: ${botIds.join(', ')}`);
-        }
-
-        if (botIds.length === 0) {
-          console.error('没有可用的机器人');
-          return;
-        }
-
-        // 创建并添加用户消息
-        const userMessage: ChatMessage = {
-          id: uuidv4(),
-          role: 'user',
-          content,
-          created_at: Date.now(),
-          bot_id: '',
-        };
-
-        // 发送新消息前清空之前的状态
-        completedBotsRef.current.clear();
-        setPendingBots([]);
-        setCurrentReplyingBot(null);
-
-        // 更新消息列表，只添加用户消息
-        setMessages((prev) => [...prev, userMessage]);
-
-        // 等待状态更新
-        setTimeout(() => {
-          // 设置待回复的机器人队列 (从第二个开始)
-          if (botIds.length > 1) {
-            setPendingBots(botIds.slice(1));
-            console.log(`设置待回复机器人队列: ${botIds.slice(1).join(', ')}`);
-          }
-
-          // 开始第一个机器人的回复
-          if (botIds.length > 0) {
-            handleBotReply(botIds[0], content, activeConversation.id);
-          }
-        }, 200); // 增加延迟，确保状态更新完成
-      } catch (error) {
-        console.error('获取机器人列表失败:', error);
-      }
-    },
-    [isLoading, activeConversation, selectedBot, handleBotReply]
-  );
-
-  useEffect(() => {
-    // 每次 handleBotReply 变化时，更新引用
-    handleBotReplyRef.current = handleBotReply;
-  }, [handleBotReply]);
-
-  // 处理退出确认
-  const handleLogoutConfirm = () => {
-    setLogoutModalOpen(false);
-    onLogout();
-  };
-
-  // 主题和响应式布局
-  const isDark = colorScheme === 'dark';
-  const theme = useMantineTheme();
-  const isMobile = useMediaQuery(`(max-width: ${theme.breakpoints.sm})`);
-  const isTablet = useMediaQuery(`(max-width: ${theme.breakpoints.md})`);
-
-  const abortControllerRef = useRef<() => void | null>(null);
-
-  // 创建 ref 跟踪最后加载的会话ID
-  const lastLoadedConversationRef = useRef<string | null>(null);
-
-  const handleSelectConversation = useCallback(
-    async (conversation: Conversation) => {
-      if (!conversation) return;
-
-      try {
-        setIsLoading(true);
-        lastLoadedConversationRef.current = conversation.id;
-
-        // 加载消息
-        const messages = await loadConversationMessages(conversation.id);
-
-        // 提取bot_id信息
-        const botIds = extractBotIds(messages || []);
-        const primaryBotId = getPrimaryBotId(messages || []);
-
-        console.log(
-          `会话 ${conversation.id} 包含角色: ${botIds.join(', ')}, 主要角色: ${
-            primaryBotId || '未知'
-          }`
-        );
-
-        // 保存带有bot_id信息的增强版会话
-        const enrichedConversation = {
-          ...conversation,
-          botIds,
-          primaryBotId,
-        };
-
-        setActiveConversation(enrichedConversation);
-
-        const processedMessages = processGroupChatHistory(messages || []);
-
-        // 排序消息
-        const sortedMessages = processedMessages
-          ? [...processedMessages].sort((a, b) => {
-              if (a.created_at && b.created_at) {
-                return a.created_at - b.created_at;
-              }
-              return 0;
-            })
-          : [];
-
-        setMessages(sortedMessages || []);
-
-        if (isMobile) {
-          setSidebarVisible(false);
-        }
-      } catch (error) {
-        console.error('加载会话消息失败:', error);
-        lastLoadedConversationRef.current = null;
-      } finally {
-        setIsLoading(false);
-      }
-    },
-    [isMobile, loadConversationMessages]
-  );
-
-  const sortedConversations = useMemo(() => {
-    // 添加条件判断和更多日志
-    if (!conversations) {
-      console.log('会话列表不存在');
-      return [];
-    }
-
-    if (conversations.length === 0) {
-      console.log('会话列表为空');
-      return [];
-    }
-
-    console.log('计算排序后的对话列表, 原始数量:', conversations.length);
-
-    // 添加额外的检查确保每个对象有 updatedAt 属性
-    const validConversations = conversations.filter((c) => {
-      if (c && typeof c.updatedAt === 'number') {
-        return true;
-      }
-      console.warn('发现无效的会话对象:', c);
-      return false;
-    });
-
-    // 按更新时间排序，最新的在前面
-    const sorted = [...validConversations].sort(
-      (a, b) => b.updatedAt - a.updatedAt
-    );
-    console.log('排序后的对话列表数量:', sorted.length);
-
-    return sorted;
-  }, [conversations]);
-
-  useLayoutEffect(() => {
-    if (appReady && sortedConversations.length > 0 && !activeConversation) {
-      console.log(
-        'layout effect: 检测到会话列表有数据但无选中会话，自动选择第一条'
-      );
-      handleSelectConversation(sortedConversations[0]);
-    }
-  }, [
+  // 使用初始化钩子
+  const {
     appReady,
-    sortedConversations,
-    activeConversation,
-    handleSelectConversation,
-  ]);
+    initializationStageRef,
+    hasInitializedRef,
+    checkAndFinishLoading,
+  } = useAppInitialization({
+    conversationsInitialized,
+    loadBotData,
+    setIsLoading,
+  });
 
-  // 响应式布局处理
-  useEffect(() => {
-    if (isMobile || isTablet) {
-      setSidebarVisible(false);
-    } else {
-      setSidebarVisible(true);
-    }
-  }, [isMobile, isTablet]);
-
-  // 监听 conversations 变化，确保列表更新时界面同步
-  useEffect(() => {
-    console.log('会话列表已更新, 数量:', conversations.length);
-
-    // 如果有会话但没有当前选中的会话，选择第一个
-    if (conversations.length > 0 && !activeConversation && appReady) {
-      const sortedConvs = [...conversations].sort(
-        (a, b) => b.updatedAt - a.updatedAt
-      );
-      handleSelectConversation(sortedConvs[0]);
-    }
-  }, [conversations, activeConversation, appReady, handleSelectConversation]);
-
-  const hasInitialized = useRef(false);
-  // 修改初始加载对话逻辑，确保数据加载完成后才显示
-  useEffect(() => {
-    if (!conversationsInitialized || hasInitialized.current) {
-      return;
-    }
-
-    hasInitialized.current = true;
-
-    console.log('会话数据初始化');
-
-    // 一次性请求数据
-    (async () => {
-      setIsLoading(true);
-      try {
-        // 使用 force 和 immediate 参数确保请求执行
-        await fetchConversations(true, true);
-
-        setIsInitialLoad(false);
-        setAppReady(true);
-
-        // 计时器添加到异步函数内部
-        const timeoutId = setTimeout(() => {
-          if (isLoading) {
-            console.log('加载超时保护触发');
-            setIsLoading(false);
-          }
-        }, 5000);
-
-        return () => clearTimeout(timeoutId);
-      } catch (error) {
-        console.error('初始化失败:', error);
-        setIsInitialLoad(false);
-        setAppReady(true);
-        setIsLoading(false);
-      }
-    })();
-  }, [conversationsInitialized, fetchConversations, isLoading]);
-
-  // 当 activeConversation 改变时，加载消息
-  useEffect(() => {
-    if (activeConversation && !isInitialLoad) {
-      console.log(
-        'activeConversation变化，从服务器加载消息:',
-        activeConversation.id
-      );
-
-      if (lastLoadedConversationRef.current === activeConversation.id) {
-        console.log(
-          '会话已经在点击时加载过消息，跳过重复请求:',
-          activeConversation.id
-        );
-        return;
-      }
-
-      loadConversationMessages(activeConversation.id)
-        .then((messages) => {
-          console.log('服务器返回消息数量:', messages?.length || 0);
-          const sortedMessages = messages
-            ? [...messages].sort((a, b) => {
-                if (a.created_at && b.created_at) {
-                  return a.created_at - b.created_at;
-                }
-                // 否则保持原有顺序，假设服务端已按正确顺序返回
-                return 0;
-              })
-            : [];
-          setMessages(sortedMessages || []);
-        })
-        .catch((err) => {
-          console.error('加载消息失败:', err);
-          setMessages([]);
-        });
-    }
-  }, [activeConversation, isInitialLoad, loadConversationMessages]);
-
-  const originSetting: ChatSettings = {
-    temperature: 0.7,
-    maxTokens: 500,
-    model: 'deepseek-coder',
-    streamMode: true,
-  };
-
-  // 修改获取机器人列表的逻辑
-  const botListInitializedRef = useRef(false);
-
-  useEffect(() => {
-    messagesRef.current = messages;
-  }, [messages]);
-
-  useEffect(() => {
-    activeConversationRef.current = activeConversation;
-  }, [activeConversation]);
-
-  useEffect(() => {
-    // 添加局部标记防止重复请求
-    if (conversationsInitialized && !botListInitializedRef.current) {
-      // 标记为已经初始化
-      botListInitializedRef.current = true;
-      npcAPI
-        .getBotList(true)
-        .then((bots) => {
-          const avatarMap: Record<string, string> = {};
-          const nameMap: Record<string, string> = {};
-
-          bots.forEach((bot) => {
-            if (bot.bot_id && bot.icon_url) {
-              avatarMap[bot.bot_id] = bot.icon_url;
-            }
-            if (bot.bot_name) {
-              nameMap[bot.bot_id] = bot.bot_name;
-            }
-          });
-
-          console.log(
-            '机器人头像和名称映射已创建, 数量:',
-            Object.keys(avatarMap).length
-          );
-          setBotAvatars(avatarMap);
-          setBotNames(nameMap);
-        })
-        .catch((error) => {
-          console.error('获取角色列表失败:', error);
-        });
-    }
-  }, [conversationsInitialized]);
-
-  const stopGeneration = useCallback(() => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current();
-      abortControllerRef.current = null;
-      setIsLoading(false);
-    }
+  // 创建一个消息设置的占位符
+  const messagesSetter = React.useCallback((messages: ChatMessage[]) => {
+    // 在会话钩子初始化时此函数不会被调用，只是为了满足类型需要
+    console.log('Messages setter placeholder', messages.length);
   }, []);
 
-  const handleDeleteConversation = useCallback(
-    async (id: string) => {
-      await deleteConversation(id);
-      await fetchConversations();
+  // 初始化会话钩子
+  const {
+    activeConversation,
+    sortedConversations,
+    handleSelectConversation,
+    handleCreateConversation,
+    handleDeleteConversation,
+  } = useChatConversation({
+    conversations,
+    createConversation,
+    deleteConversation,
+    loadConversationMessages,
+    fetchConversations,
+    isMobile,
+    setSidebarVisible,
+    setIsLoading,
+    setMessages: messagesSetter,
+    appReady,
+    initializationStageRef,
+    checkAndFinishLoading,
+  });
 
-      // 如果删除的是当前活动对话，则切换到其他对话
-      if (activeConversation?.id === id) {
-        if (conversations.length > 0) {
-          // 按更新时间排序选择最近的一个对话
-          const remainingConversations = conversations.filter(
-            (c) => c.id !== id
-          );
-          if (remainingConversations.length > 0) {
-            const sortedConversations = [...remainingConversations].sort(
-              (a, b) => b.updatedAt - a.updatedAt
-            );
-            await handleSelectConversation(sortedConversations[0]);
-          } else {
-            // 如果没有剩余对话，创建一个新的
-            const newConversation = await createConversation();
-            setActiveConversation(newConversation);
-            setMessages([]);
-          }
-        } else {
-          // 如果没有对话，创建一个新的
-          const newConversation = await createConversation();
-          setActiveConversation(newConversation);
-          setMessages([]);
-        }
-      }
-    },
-    [
-      activeConversation,
-      conversations,
-      createConversation,
-      deleteConversation,
-      fetchConversations,
-      handleSelectConversation,
-    ]
-  );
+  // 使用消息处理钩子
+  const { messages, handleSendMessage, stopGeneration } = useMessageHandling({
+    activeConversation,
+    selectedBot,
+    sendMessageToNpc,
+    initialMessages: activeConversation?.messages || [],
+  });
 
-  const handleCreateConversation = useCallback(async () => {
-    try {
+  // 初始化逻辑 - 在此仅做必要的数据加载
+  useEffect(() => {
+    if (
+      conversationsInitialized &&
+      hasInitializedRef.current &&
+      !hasInitializedRef.current.conversations
+    ) {
+      hasInitializedRef.current.conversations = true;
       setIsLoading(true);
-      const newConversation = await createConversation();
-      setActiveConversation(newConversation);
-      setMessages([]);
 
-      if (isMobile) setSidebarVisible(false);
-    } catch (error) {
-      console.error('创建会话失败:', error);
-    } finally {
-      setIsLoading(false);
+      loadBotData(true).catch((error) => {
+        console.error('加载机器人数据失败', error);
+        setIsLoading(false);
+      });
     }
-  }, [createConversation, isMobile]);
+  }, [conversationsInitialized, loadBotData, hasInitializedRef, setIsLoading]);
 
+  // 应用未就绪时显示加载画面
   if (!appReady) {
     return (
       <Box
@@ -742,14 +204,30 @@ export function Chat({
       >
         <LoadingOverlay
           visible={true}
-          overlayProps={{
-            blur: 2,
-          }}
+          overlayProps={{ blur: 2 }}
           loaderProps={{ color: isDark ? 'blue.6' : 'blue.5', size: 'xl' }}
         />
       </Box>
     );
   }
+
+  // 将MessageList组件记忆化，避免不必要的重渲染
+  const MemoizedMessageList = memo(MessageList);
+
+  // 处理选择机器人
+  const handleBotSelection = (bot: NpcBot) => {
+    if (bot && bot.bot_id) {
+      handleSelectBot(bot.bot_id);
+    }
+  };
+
+  // 安全设置标题
+  const handleSetTitle = (conversationId: string, currentTitle?: string) => {
+    const newTitle = prompt('请输入新的会话标题', currentTitle || '');
+    if (newTitle) {
+      updateConversation(conversationId, { title: newTitle });
+    }
+  };
 
   return (
     <AppShell
@@ -757,6 +235,7 @@ export function Chat({
       style={{ height: '100vh', overflow: 'hidden' }}
       header={{ height: 60 }}
     >
+      {/* 应用头部 */}
       <AppShell.Header
         style={{
           backgroundColor: isDark ? '#1A1B1E' : 'white',
@@ -779,17 +258,14 @@ export function Chat({
               opened={sidebarVisible}
               onClick={() => setSidebarVisible(!sidebarVisible)}
               size="sm"
-              color={isDark ? '#C1C2C5' : '#333'}
+              color={isDark ? '#E6E6E7' : '#333'}
               mr="sm"
               display={isMobile || isTablet ? 'block' : 'none'}
             />
             <IconBrandOpenai size={28} color={isDark ? '#61AFEF' : '#5C7CFA'} />
             <Title
               order={3}
-              style={{
-                fontWeight: 600,
-                color: isDark ? '#C1C2C5' : '#333',
-              }}
+              style={{ fontWeight: 600, color: isDark ? '#E6E6E7' : '#333' }}
             >
               AI 智能体
             </Title>
@@ -805,16 +281,6 @@ export function Chat({
             >
               {isDark ? <IconSun size={20} /> : <IconMoon size={20} />}
             </ActionIcon>
-
-            {/* <ActionIcon
-              variant="subtle"
-              color={isDark ? 'blue.6' : 'blue.5'}
-              size="lg"
-              onClick={() => setSettingsOpened(true)}
-              radius="xl"
-            >
-              <IconSettings size={20} />
-            </ActionIcon> */}
 
             <ActionIcon
               variant="subtle"
@@ -838,16 +304,6 @@ export function Chat({
           padding: '16px',
         }}
       >
-        {/* 移动端侧边栏覆盖层 */}
-        {isMobile && sidebarVisible && (
-          <Overlay
-            color={isDark ? '#000' : '#f0f0f0'}
-            backgroundOpacity={0.5}
-            zIndex={99}
-            onClick={() => setSidebarVisible(false)}
-          />
-        )}
-
         {/* 弹性布局容器 - 包含侧边栏和聊天区域 */}
         <Box
           style={{
@@ -858,6 +314,16 @@ export function Chat({
             marginTop: 60,
           }}
         >
+          {/* 移动端侧边栏覆盖层 */}
+          {isMobile && sidebarVisible && (
+            <Overlay
+              color={isDark ? '#000' : '#f0f0f0'}
+              backgroundOpacity={0.5}
+              zIndex={99}
+              onClick={() => setSidebarVisible(false)}
+            />
+          )}
+
           {/* 侧边栏对话列表 */}
           <Transition
             mounted={sidebarVisible}
@@ -865,207 +331,252 @@ export function Chat({
             duration={200}
           >
             {(styles) => (
-              <Paper
-                shadow="md"
-                radius="lg"
+              <Box
                 style={{
                   ...styles,
-                  width: isMobile ? '100%' : isTablet ? '250px' : '300px',
-                  flexShrink: 0,
-                  height: '100%',
                   display: 'flex',
-                  flexDirection: 'column',
-                  backgroundColor: isDark ? '#1A1B1E' : 'white',
+                  gap: 12,
+                  width: isMobile ? '100%' : 'auto',
                   position: isMobile ? 'absolute' : 'relative',
+                  zIndex: 100,
                   left: 0,
                   top: 0,
-                  zIndex: 100,
                 }}
               >
-                {/* 侧边栏标题 */}
-                <Box
-                  p="md"
+                {/* 会话列表面板 */}
+                <Paper
+                  shadow="md"
+                  radius="lg"
                   style={{
-                    borderBottom: `1px solid ${isDark ? '#2C2E33' : '#eee'}`,
+                    width: isMobile ? '100%' : isTablet ? '260px' : '320px',
+                    flexShrink: 0,
+                    height: '100%',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    backgroundColor: isDark ? '#1A1B1E' : 'white',
+                    transition: 'all 0.2s ease-out',
                   }}
                 >
-                  <Group justify="space-between" align="center">
-                    <Title
-                      order={5}
-                      style={{ color: isDark ? '#C1C2C5' : '#333' }}
-                    >
-                      会话列表
-                    </Title>
-                    <Group>
-                      {isMobile && (
-                        <ActionIcon
-                          variant="subtle"
-                          onClick={() => setSidebarVisible(false)}
-                          color={isDark ? 'gray.4' : 'gray.7'}
-                        >
-                          <IconChevronLeft size={18} />
-                        </ActionIcon>
-                      )}
-                      <ActionIcon
-                        variant="light"
-                        color={isDark ? 'blue.7' : 'blue.5'}
-                        radius="xl"
-                        size="md"
-                        onClick={handleCreateConversation}
-                        title="新建对话"
-                      >
-                        <IconPlus size={16} />
-                      </ActionIcon>
-                    </Group>
-                  </Group>
-                </Box>
-
-                {/* 对话列表滚动区域 */}
-                <ScrollArea
-                  style={{ flex: 1 }}
-                  offsetScrollbars
-                  scrollbarSize={6}
-                >
-                  <Stack p="md" gap="sm">
-                    {sortedConversations.length > 0 ? (
-                      sortedConversations.map((conversation) => {
-                        const isActive =
-                          activeConversation?.id === conversation.id;
-                        return (
-                          <Paper
-                            key={conversation.id}
-                            shadow={isActive ? 'sm' : 'none'}
-                            p="sm"
-                            radius="md"
-                            withBorder={isActive}
-                            style={{
-                              cursor: 'pointer',
-                              backgroundColor: isActive
-                                ? isDark
-                                  ? '#25262B'
-                                  : '#f8f9fa'
-                                : 'transparent',
-                              borderColor: isActive
-                                ? isDark
-                                  ? '#4c7afa'
-                                  : '#4c7afa'
-                                : 'transparent',
-                              transition: 'all 0.2s ease',
-                            }}
-                            onClick={() =>
-                              handleSelectConversation(conversation)
-                            }
-                          >
-                            {/* 会话项内容 */}
-                            <Group justify="space-between" wrap="nowrap">
-                              <Group gap="sm" wrap="nowrap" style={{ flex: 1 }}>
-                                <IconMessage
-                                  size={18}
-                                  color={
-                                    isActive
-                                      ? isDark
-                                        ? '#4c7afa'
-                                        : '#4c7afa'
-                                      : isDark
-                                      ? '#C1C2C5'
-                                      : '#666'
-                                  }
-                                />
-                                <Text
-                                  lineClamp={1}
-                                  size="sm"
-                                  fw={isActive ? 600 : 400}
-                                  style={{
-                                    color: isActive
-                                      ? isDark
-                                        ? '#C1C2C5'
-                                        : '#333'
-                                      : isDark
-                                      ? '#C1C2C5'
-                                      : '#666',
-                                  }}
-                                >
-                                  {conversation.title || '新对话'}
-                                </Text>
-                              </Group>
-                              {/* 操作按钮 */}
-                              {isActive && (
-                                <Group gap={8}>
-                                  <ActionIcon
-                                    size="xs"
-                                    variant="subtle"
-                                    color={isDark ? 'gray.6' : 'gray.6'}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      const newTitle = prompt(
-                                        '请输入新的会话标题',
-                                        conversation.title
-                                      );
-                                      if (newTitle) {
-                                        updateConversation(conversation.id, {
-                                          title: newTitle,
-                                        });
-                                      }
-                                    }}
-                                    radius="xl"
-                                  >
-                                    <IconEdit size={14} />
-                                  </ActionIcon>
-                                  <ActionIcon
-                                    size="xs"
-                                    variant="subtle"
-                                    color="red"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleDeleteConversation(conversation.id);
-                                    }}
-                                    radius="xl"
-                                  >
-                                    <IconTrash size={14} />
-                                  </ActionIcon>
-                                </Group>
-                              )}
-                            </Group>
-                          </Paper>
-                        );
-                      })
-                    ) : (
-                      <Box style={{ textAlign: 'center', padding: '20px 0' }}>
-                        <Text size="sm" color="dimmed">
-                          没有对话记录
-                        </Text>
-                        <Button
-                          variant="light"
-                          size="sm"
-                          onClick={handleCreateConversation}
-                          mt="md"
-                        >
-                          开始新对话
-                        </Button>
-                      </Box>
-                    )}
-                  </Stack>
-                </ScrollArea>
-
-                {/* 底部新建按钮 */}
-                <Box
-                  p="md"
-                  style={{
-                    borderTop: `1px solid ${isDark ? '#2C2E33' : '#eee'}`,
-                  }}
-                >
-                  <Button
-                    fullWidth
-                    leftSection={<IconPlus size={16} />}
-                    onClick={handleCreateConversation}
-                    variant={isDark ? 'light' : 'filled'}
-                    color={isDark ? 'blue.7' : 'blue.5'}
-                    radius="md"
+                  {/* 侧边栏标题 */}
+                  <Box
+                    p="md"
+                    style={{
+                      borderBottom: `1px solid ${isDark ? '#2C2E33' : '#eee'}`,
+                    }}
                   >
-                    新建对话
-                  </Button>
-                </Box>
-              </Paper>
+                    <Group justify="space-between" align="center">
+                      <Title
+                        order={5}
+                        style={{ color: isDark ? '#E6E6E7' : '#333' }}
+                      >
+                        会话列表
+                      </Title>
+                      <Group>
+                        {isMobile && (
+                          <ActionIcon
+                            variant="subtle"
+                            onClick={() => setSidebarVisible(false)}
+                            color={isDark ? 'gray.4' : 'gray.7'}
+                          >
+                            <IconChevronLeft size={18} />
+                          </ActionIcon>
+                        )}
+                        <ActionIcon
+                          variant="light"
+                          color={isDark ? 'blue.7' : 'blue.5'}
+                          radius="xl"
+                          size="md"
+                          onClick={handleCreateConversation}
+                          title="新建对话"
+                        >
+                          <IconPlus size={16} />
+                        </ActionIcon>
+                      </Group>
+                    </Group>
+                  </Box>
+
+                  {/* 对话列表滚动区域 */}
+                  <ScrollArea
+                    style={{ flex: 1 }}
+                    offsetScrollbars
+                    scrollbarSize={6}
+                  >
+                    <Stack p="md" gap="sm">
+                      {sortedConversations && sortedConversations.length > 0 ? (
+                        sortedConversations.map((conversation) => {
+                          const isActive =
+                            activeConversation?.id === conversation.id;
+                          return (
+                            <Paper
+                              key={conversation.id}
+                              shadow={isActive ? 'sm' : 'none'}
+                              p="sm"
+                              radius="md"
+                              withBorder={isActive}
+                              style={{
+                                cursor: 'pointer',
+                                backgroundColor: isActive
+                                  ? isDark
+                                    ? '#25262B'
+                                    : '#f8f9fa'
+                                  : 'transparent',
+                                borderColor: isActive
+                                  ? isDark
+                                    ? '#4c7afa'
+                                    : '#4c7afa'
+                                  : 'transparent',
+                                transition: 'all 0.2s ease',
+                              }}
+                              onClick={() =>
+                                handleSelectConversation(conversation)
+                              }
+                            >
+                              {/* 会话项内容 */}
+                              <Group justify="space-between" wrap="nowrap">
+                                <Group
+                                  gap="sm"
+                                  wrap="nowrap"
+                                  style={{ flex: 1 }}
+                                >
+                                  <IconMessage
+                                    size={18}
+                                    color={
+                                      isActive
+                                        ? isDark
+                                          ? '#4c7afa'
+                                          : '#4c7afa'
+                                        : isDark
+                                        ? '#E6E6E7'
+                                        : '#666'
+                                    }
+                                  />
+                                  <Text
+                                    lineClamp={1}
+                                    size="sm"
+                                    fw={isActive ? 600 : 400}
+                                    style={{
+                                      color: isActive
+                                        ? isDark
+                                          ? '#E6E6E7'
+                                          : '#333'
+                                        : isDark
+                                        ? '#E6E6E7'
+                                        : '#666',
+                                    }}
+                                  >
+                                    {conversation.title || '新对话'}
+                                  </Text>
+                                </Group>
+
+                                {/* 操作按钮 */}
+                                {isActive && (
+                                  <Group gap={8}>
+                                    <ActionIcon
+                                      size="xs"
+                                      variant="subtle"
+                                      color={isDark ? 'gray.6' : 'gray.6'}
+                                      onClick={(e: React.MouseEvent) => {
+                                        e.stopPropagation();
+                                        handleSetTitle(
+                                          conversation.id,
+                                          conversation.title
+                                        );
+                                      }}
+                                      radius="xl"
+                                    >
+                                      <IconEdit size={14} />
+                                    </ActionIcon>
+                                    <ActionIcon
+                                      size="xs"
+                                      variant="subtle"
+                                      color="red"
+                                      onClick={(e: React.MouseEvent) => {
+                                        e.stopPropagation();
+                                        handleDeleteConversation(
+                                          conversation.id
+                                        );
+                                      }}
+                                      radius="xl"
+                                    >
+                                      <IconTrash size={14} />
+                                    </ActionIcon>
+                                  </Group>
+                                )}
+                              </Group>
+                            </Paper>
+                          );
+                        })
+                      ) : (
+                        <Box style={{ textAlign: 'center', padding: '20px 0' }}>
+                          <Text size="sm" color="dimmed">
+                            没有对话记录
+                          </Text>
+                          <Button
+                            variant="light"
+                            size="sm"
+                            onClick={handleCreateConversation}
+                            mt="md"
+                          >
+                            开始新对话
+                          </Button>
+                        </Box>
+                      )}
+                    </Stack>
+                  </ScrollArea>
+
+                  {/* 底部新建按钮 */}
+                  <Box
+                    p="md"
+                    style={{
+                      borderTop: `1px solid ${isDark ? '#2C2E33' : '#eee'}`,
+                    }}
+                  >
+                    <Button
+                      fullWidth
+                      leftSection={<IconPlus size={16} />}
+                      onClick={handleCreateConversation}
+                      variant={isDark ? 'light' : 'filled'}
+                      color={isDark ? 'blue.7' : 'blue.5'}
+                      radius="md"
+                    >
+                      新建对话
+                    </Button>
+                  </Box>
+                </Paper>
+
+                {/* 角色列表 - 添加到左侧 */}
+                {!isMobile && (
+                  <NpcBotList
+                    bots={Object.entries(botAvatars).map(
+                      ([botId, iconUrl]) => ({
+                        bot_id: botId,
+                        bot_name: botNames[botId] || `Bot ${botId.slice(0, 6)}`,
+                        icon_url: iconUrl,
+                        description: botDecs[botId] || '',
+                      })
+                    )}
+                    loading={isLoading}
+                    error={null}
+                    isDark={isDark}
+                    onSelectBot={handleBotSelection}
+                    selectedBotId={selectedBot}
+                    onRefresh={() => {
+                      // 设置加载状态，确保用户有反馈
+                      setIsLoading(true);
+                      npcAPI
+                        .getBotList(true)
+                        .then((bots) => {
+                          console.log('刷新获取机器人列表成功:', bots?.length);
+                          updateBotData(bots);
+                        })
+                        .catch((err) =>
+                          console.error('刷新获取机器人列表失败:', err)
+                        )
+                        .finally(() => setIsLoading(false));
+                    }}
+                  />
+                )}
+              </Box>
             )}
           </Transition>
 
@@ -1081,8 +592,170 @@ export function Chat({
               backgroundColor: isDark ? '#1A1B1E' : 'white',
               overflow: 'hidden',
               position: 'relative',
+              backgroundImage: chatBgImage ? `url(${chatBgImage})` : 'none',
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+              backgroundRepeat: 'no-repeat',
+              transition: 'all 0.2s ease-out',
             }}
           >
+            {/* 聊天背景遮罩层 */}
+            {chatBgImage && (
+              <>
+                {/* 主遮罩层 */}
+                <Box
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    backgroundColor: isDark
+                      ? 'rgba(26, 27, 30, 0.65)'
+                      : 'rgba(255, 255, 255, 0.5)',
+                    // backdropFilter: 'blur(4px)',
+                    zIndex: 1,
+                  }}
+                />
+
+                {/* 亮色模式的额外蒙层 */}
+                {!isDark && (
+                  <Box
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      background:
+                        'linear-gradient(rgba(0, 0, 0, 0.08) 0%, rgba(0, 0, 0, 0.15) 100%)',
+                      zIndex: 1,
+                    }}
+                  />
+                )}
+              </>
+            )}
+
+            {/* 会话标题区域 */}
+            {activeConversation && (
+              <Box
+                p="sm"
+                style={{
+                  borderBottom: `1px solid ${isDark ? '#2C2E33' : '#f0f0f0'}`,
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  position: 'relative',
+                  zIndex: 2,
+                }}
+              >
+                <Group>
+                  {/* 当前选中角色的头像 */}
+                  {selectedBot && botAvatars[selectedBot] && (
+                    <Avatar
+                      src={botAvatars[selectedBot]}
+                      size="sm"
+                      radius="xl"
+                      style={{
+                        border: `1px solid ${isDark ? '#4c7afa' : '#5C7CFA'}`,
+                      }}
+                    >
+                      <IconRobot size={16} />
+                    </Avatar>
+                  )}
+
+                  <Box>
+                    {/* 当前角色名称 */}
+                    {selectedBot && (
+                      <Text size="xs" c={isDark ? 'gray.2' : 'gray.9'} fw={600}>
+                        {botNames[selectedBot] || '未命名角色'}
+                      </Text>
+                    )}
+
+                    {/* 会话标题 */}
+                    <Text
+                      fw={600}
+                      size="sm"
+                      c={isDark ? '#E6E6E7' : '#222'}
+                      style={{
+                        textShadow: isDark
+                          ? 'none'
+                          : '0 1px 2px rgba(0,0,0,0.1)',
+                      }}
+                    >
+                      {activeConversation.title || '新对话'}
+                    </Text>
+                  </Box>
+                </Group>
+
+                {/* 添加背景选择按钮到标题区域 */}
+                <Group>
+                  <Menu shadow="md" width={220} position="bottom-end">
+                    <Menu.Target>
+                      <ActionIcon
+                        size="sm"
+                        variant="subtle"
+                        color={isDark ? 'gray.4' : 'gray.7'}
+                        title="更换聊天背景"
+                      >
+                        <IconPhotoEdit size={14} />
+                      </ActionIcon>
+                    </Menu.Target>
+
+                    <Menu.Dropdown>
+                      <Menu.Label>聊天背景</Menu.Label>
+                      <Menu.Item
+                        leftSection={<IconPhoto size={14} />}
+                        onClick={handleBgImageUpload}
+                      >
+                        上传背景图
+                      </Menu.Item>
+
+                      <Menu.Divider />
+
+                      <Menu.Label>预设背景</Menu.Label>
+                      <Box p="xs">
+                        <ImageGallery
+                          onSelect={handleBgImageSelect}
+                          isDark={isDark}
+                        />
+                      </Box>
+
+                      {chatBgImage && (
+                        <>
+                          <Menu.Divider />
+                          <Menu.Item
+                            color="red"
+                            leftSection={<IconTrash size={14} />}
+                            onClick={handleRemoveBgImage}
+                          >
+                            移除背景
+                          </Menu.Item>
+                        </>
+                      )}
+                    </Menu.Dropdown>
+                  </Menu>
+
+                  {/* 编辑按钮 */}
+                  <ActionIcon
+                    size="sm"
+                    variant="subtle"
+                    color={isDark ? 'gray.4' : 'gray.7'}
+                    onClick={() => {
+                      if (activeConversation) {
+                        handleSetTitle(
+                          activeConversation.id,
+                          activeConversation.title
+                        );
+                      }
+                    }}
+                  >
+                    <IconEdit size={14} />
+                  </ActionIcon>
+                </Group>
+              </Box>
+            )}
+
             {/* 聊天区域 - 消息显示 */}
             <Box
               style={{
@@ -1091,10 +764,74 @@ export function Chat({
                 flexDirection: 'column',
                 overflow: 'hidden',
                 position: 'relative',
-                padding: '10px',
+                padding: '6px',
+                zIndex: 2,
               }}
             >
-              {messages.length === 0 ? (
+              {/* 加载状态覆盖层 */}
+              {isLoading && (
+                <Box
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    backgroundColor: 'transparent', // 移除背景色，使用更微妙的效果
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 10,
+                    pointerEvents: 'none', // 允许点击穿透，只在必要时阻止交互
+                  }}
+                >
+                  <Box
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 10,
+                      padding: '12px',
+                      borderRadius: '12px',
+                      backdropFilter: 'blur(8px)',
+                      backgroundColor: isDark
+                        ? 'rgba(37, 38, 43, 0.7)'
+                        : 'rgba(255, 255, 255, 0.7)',
+                      boxShadow: isDark
+                        ? '0 8px 20px rgba(0, 0, 0, 0.3)'
+                        : '0 8px 20px rgba(0, 0, 0, 0.1)',
+                      animation: 'fadeIn 0.3s ease',
+                      minWidth: '80px',
+                      minHeight: '80px',
+                    }}
+                  >
+                    <Box
+                      style={{
+                        width: '36px',
+                        height: '36px',
+                        borderRadius: '50%',
+                        borderTop: `3px solid ${
+                          isDark ? '#4c7afa' : '#5C7CFA'
+                        }`,
+                        borderRight: `3px solid transparent`,
+                        animation: 'spin 1s linear infinite',
+                      }}
+                    />
+                    <Text
+                      size="xs"
+                      fw={500}
+                      opacity={0.8}
+                      c={isDark ? 'gray.3' : 'gray.7'}
+                      style={{ marginTop: '8px' }}
+                    >
+                      少侠请稍等...
+                    </Text>
+                  </Box>
+                </Box>
+              )}
+
+              {!messages || messages.length === 0 ? (
                 <Box
                   style={{
                     flex: 1,
@@ -1113,9 +850,14 @@ export function Chat({
                   <Text
                     mt="xl"
                     size="xl"
-                    c={isDark ? 'gray.4' : 'gray.7'}
+                    c={isDark ? 'gray.1' : 'gray.9'}
                     ta="center"
                     fw={600}
+                    style={{
+                      textShadow: isDark
+                        ? 'none'
+                        : '0 1px 2px rgba(0,0,0,0.08)',
+                    }}
                   >
                     {!activeConversation
                       ? '请选择或创建一个对话'
@@ -1123,11 +865,16 @@ export function Chat({
                   </Text>
                   <Text
                     size="sm"
-                    c={isDark ? 'gray.5' : 'gray.6'}
+                    c={isDark ? 'gray.3' : 'gray.8'}
                     mt="md"
                     maw={450}
                     ta="center"
                     px="lg"
+                    style={{
+                      textShadow: isDark
+                        ? 'none'
+                        : '0 1px 1px rgba(0,0,0,0.05)',
+                    }}
                   >
                     {!activeConversation
                       ? '从左侧列表选择一个已有对话，或创建一个新对话'
@@ -1154,87 +901,103 @@ export function Chat({
                     overflow: 'hidden',
                   }}
                 >
-                  <MessageList
+                  <MemoizedMessageList
                     messages={messages}
                     style={{ flex: 1 }}
                     isDark={isDark}
                     customRenderer={customMessageRenderer}
                     botAvatars={botAvatars}
                     botNames={botNames}
+                    nameToIdMap={nameToIdMap}
                   />
 
-                  {/* 添加机器人选择器 */}
-                  <Paper
-                    p="xs"
-                    radius="md"
-                    style={{
-                      marginTop: '8px',
-                      marginBottom: '4px',
-                      backgroundColor: isDark ? '#25262B' : '#f8f9fa',
-                      borderTop: `1px solid ${isDark ? '#2C2E33' : '#f0f0f0'}`,
-                    }}
-                  >
-                    <Box>
-                      <Group justify="apart">
-                        <Text size="xs" c={isDark ? 'gray.5' : 'gray.7'}>
-                          {selectedBot
-                            ? '已选择指定机器人回复'
-                            : '所有机器人将依次回复'}
-                        </Text>
-                        {selectedBot && (
-                          <ActionIcon
+                  {/* 移动设备的角色选择器 */}
+                  {isMobile && (
+                    <Paper
+                      p="xs"
+                      radius="md"
+                      style={{
+                        marginTop: '8px',
+                        marginBottom: '4px',
+                        backgroundColor: isDark
+                          ? 'rgba(37, 38, 43, 0.85)'
+                          : 'rgba(248, 249, 250, 0.85)',
+                        borderTop: `1px solid ${
+                          isDark ? '#2C2E33' : '#f0f0f0'
+                        }`,
+                        backdropFilter: 'blur(5px)',
+                      }}
+                    >
+                      <Box>
+                        <Group justify="apart">
+                          <Text
                             size="xs"
-                            variant="subtle"
-                            onClick={() => setSelectedBot(null)}
-                            title="清除选择"
+                            c={isDark ? 'gray.2' : 'gray.8'}
+                            fw={500}
                           >
-                            <IconX size={14} />
-                          </ActionIcon>
-                        )}
-                      </Group>
-                      <ScrollArea scrollbarSize={4} mt={6}>
-                        <Group gap={8}>
-                          {Object.entries(botAvatars).map(
-                            ([botId, avatarUrl]) => (
-                              <Tooltip
-                                key={botId}
-                                label={
-                                  botNames[botId] || `Bot ${botId.slice(0, 6)}`
-                                }
-                                position="top"
-                                withArrow
-                              >
-                                <Box>
-                                  <Avatar
-                                    src={avatarUrl}
-                                    size="md"
-                                    radius="xl"
-                                    style={{
-                                      cursor: 'pointer',
-                                      border:
-                                        selectedBot === botId
-                                          ? `2px solid ${
-                                              isDark ? '#4c7afa' : '#5C7CFA'
-                                            }`
-                                          : 'none',
-                                      opacity:
-                                        selectedBot && selectedBot !== botId
-                                          ? 0.5
-                                          : 1,
-                                      transition: 'all 0.2s ease',
-                                    }}
-                                    onClick={() => handleSelectBot(botId)}
-                                  >
-                                    <IconRobot size={20} />
-                                  </Avatar>
-                                </Box>
-                              </Tooltip>
-                            )
+                            {selectedBot
+                              ? `已选择 ${
+                                  botNames[selectedBot] || '未命名角色'
+                                } 回复`
+                              : '请选择一个角色进行对话'}
+                          </Text>
+                          {selectedBot && (
+                            <ActionIcon
+                              size="xs"
+                              variant="subtle"
+                              color={isDark ? 'gray.4' : 'gray.7'}
+                              onClick={() => handleSelectBot(null)}
+                              title="清除选择"
+                            >
+                              <IconX size={14} />
+                            </ActionIcon>
                           )}
                         </Group>
-                      </ScrollArea>
-                    </Box>
-                  </Paper>
+                        <ScrollArea scrollbarSize={4} mt={6}>
+                          <Group gap={8}>
+                            {Object.entries(botAvatars).map(
+                              ([botId, avatarUrl]) => (
+                                <Tooltip
+                                  key={botId}
+                                  label={
+                                    botNames[botId] ||
+                                    `Bot ${botId.slice(0, 6)}`
+                                  }
+                                  position="top"
+                                  withArrow
+                                >
+                                  <Box>
+                                    <Avatar
+                                      src={avatarUrl}
+                                      size="md"
+                                      radius="xl"
+                                      style={{
+                                        cursor: 'pointer',
+                                        border:
+                                          selectedBot === botId
+                                            ? `2px solid ${
+                                                isDark ? '#4c7afa' : '#5C7CFA'
+                                              }`
+                                            : 'none',
+                                        opacity:
+                                          selectedBot && selectedBot !== botId
+                                            ? 0.5
+                                            : 1,
+                                        transition: 'all 0.2s ease',
+                                      }}
+                                      onClick={() => handleSelectBot(botId)}
+                                    >
+                                      <IconRobot size={20} />
+                                    </Avatar>
+                                  </Box>
+                                </Tooltip>
+                              )
+                            )}
+                          </Group>
+                        </ScrollArea>
+                      </Box>
+                    </Paper>
+                  )}
                 </Box>
               )}
             </Box>
@@ -1244,6 +1007,8 @@ export function Chat({
               p="md"
               style={{
                 borderTop: `1px solid ${isDark ? '#2C2E33' : '#f0f0f0'}`,
+                position: 'relative',
+                zIndex: 2,
               }}
             >
               <ChatInput
@@ -1251,6 +1016,8 @@ export function Chat({
                 isLoading={isLoading}
                 onStopGeneration={stopGeneration}
                 disabled={!activeConversation}
+                selectedBot={selectedBot}
+                isDark={isDark}
               />
             </Box>
           </Paper>
@@ -1265,13 +1032,8 @@ export function Chat({
         radius="md"
         padding="xl"
         withCloseButton={false}
-        overlayProps={{
-          opacity: 0.55,
-          blur: 3,
-        }}
-        style={{
-          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
-        }}
+        overlayProps={{ opacity: 0.55, blur: 3 }}
+        style={{ boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)' }}
       >
         <Box
           style={{
@@ -1284,11 +1046,9 @@ export function Chat({
           <Title order={3} mb="xl">
             确认退出登录
           </Title>
-
           <Text size="md" mb="xl" c={isDark ? 'gray.4' : 'gray.7'}>
             您确定要退出当前账户吗？可以随时重新登录。
           </Text>
-
           <Group gap="md" w="100%" mt="md">
             <Button
               variant={isDark ? 'default' : 'outline'}
@@ -1302,7 +1062,7 @@ export function Chat({
               color="red"
               size="md"
               style={{ flex: 1 }}
-              onClick={handleLogoutConfirm}
+              onClick={() => handleLogoutConfirm(onLogout)}
             >
               确认退出
             </Button>
@@ -1310,10 +1070,11 @@ export function Chat({
         </Box>
       </Modal>
 
+      {/* 设置弹窗 */}
       <SettingsModal
         opened={settingsOpened}
         onClose={() => setSettingsOpened(false)}
-        settings={settings || originSetting}
+        settings={settings}
         onSettingsChange={updateSettings}
         isDark={isDark}
       />

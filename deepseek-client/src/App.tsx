@@ -66,7 +66,7 @@ const theme = createTheme({
     ActionIcon: {
       styles: (theme: MantineTheme) => ({
         root: {
-          '&[data-variant="subtle"]:hover': {
+          '&[dataVariant="subtle"]:hover': {
             backgroundColor: theme.colors.gray[1],
           },
         },

@@ -1,4 +1,4 @@
-import { FC, useState, KeyboardEvent } from 'react';
+import { FC, useState, KeyboardEvent, useRef } from 'react';
 import { Textarea, Button, Group, Paper } from '@mantine/core';
 import { IconSend, IconPlayerStop } from '@tabler/icons-react';
 
@@ -7,6 +7,8 @@ interface ChatInputProps {
   isLoading: boolean;
   onStopGeneration: () => void;
   disabled?: boolean;
+  selectedBot: string | null;
+  isDark?: boolean;
 }
 
 export const ChatInput: FC<ChatInputProps> = ({
@@ -14,13 +16,19 @@ export const ChatInput: FC<ChatInputProps> = ({
   isLoading,
   onStopGeneration,
   disabled,
+  selectedBot,
+  isDark = false,
 }) => {
   const [input, setInput] = useState('');
 
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
   const handleSend = () => {
     if (input.trim() && !isLoading) {
-      onSendMessage(input);
+      onSendMessage('玩家|' + input.trim());
       setInput('');
+      // 发送后聚焦输入框
+      setTimeout(() => inputRef.current?.focus(), 0);
     }
   };
 
@@ -42,11 +50,15 @@ export const ChatInput: FC<ChatInputProps> = ({
       }}
     >
       <Textarea
-        placeholder="输入消息，按 Enter 发送，Shift+Enter 换行..."
+        placeholder={
+          selectedBot
+            ? '输入消息，按 Enter 发送，Shift+Enter 换行...'
+            : '请先选择一个角色再开始对话...'
+        }
         value={input}
         onChange={(e) => setInput(e.currentTarget.value)}
         onKeyDown={handleKeyDown}
-        disabled={disabled}
+        disabled={disabled || !selectedBot}
         autosize
         minRows={2}
         maxRows={6}

@@ -14,7 +14,12 @@ export function useNpcChat() {
   const { userId } = useUser();
 
   const handleSendToNpc = useCallback(
-    async (content: string, botId: string, conversationId: string, onMessageUpdate?: (content: string, isCompleted: boolean) => void) => {
+    async (
+      content: string,
+      botId: string,
+      conversationId: string,
+      onMessageUpdate?: (content: string, isCompleted: boolean) => void
+    ) => {
       if (npcLoading) return;
 
       if (!conversationId || !botId) {
@@ -54,9 +59,11 @@ export function useNpcChat() {
         eventSource = new EventSource(url); // 初始化局部变量
 
         let accumulatedContent = '';
+        let isFirstMessage = true;
 
         eventSource.onmessage = (event) => {
           try {
+            console.log('收到SSE消息:', event.data.substring(0, 100)); // 打印前100字符
             const eventData = JSON.parse(event.data);
 
             if (eventData.event === 'conversation.message.delta') {
@@ -64,23 +71,27 @@ export function useNpcChat() {
                 const delta = eventData.message.content;
                 accumulatedContent += delta;
 
-                // 更新本地消息
-                setNpcMessages((prev) =>
-                  prev.map((msg) =>
-                    msg.id === assistantMessageId
-                      ? { ...msg, content: accumulatedContent }
-                      : msg
-                  )
-                );
+                // // 立即更新本地消息，不要等待
+                // setNpcMessages((prev) =>
+                //   prev.map((msg) =>
+                //     msg.id === assistantMessageId
+                //       ? { ...msg, content: accumulatedContent }
+                //       : msg
+                //   )
+                // );
 
-                // 调用外部回调，通知Chat组件更新
-                if (onMessageUpdate) {
-                  onMessageUpdate(accumulatedContent, false);
+                if (isFirstMessage) {
+                  isFirstMessage = false;
+                  // 通知前端有新消息，但未完成（前端可获取但不开始动画）
+                  if (onMessageUpdate) {
+                    onMessageUpdate(accumulatedContent, false);
+                  }
                 }
               }
-            } else if (eventData.event === 'conversation.message.completed' ||
+            } else if (
               eventData.event === 'conversation.chat.completed' ||
-              eventData.done === true) {
+              eventData.done === true
+            ) {
               // 流式响应完成，关闭连接
               if (eventSource) {
                 eventSource.close();
@@ -91,6 +102,15 @@ export function useNpcChat() {
                 if (onMessageUpdate) {
                   onMessageUpdate(accumulatedContent, true);
                 }
+
+                // 更新本地消息状态
+                setNpcMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === assistantMessageId
+                      ? { ...msg, content: accumulatedContent }
+                      : msg
+                  )
+                );
               }
             }
           } catch (error) {
@@ -105,7 +125,6 @@ export function useNpcChat() {
             setNpcLoading(false);
           }
         };
-
       } catch (error: any) {
         setNpcError(error.message || '请求失败');
         setNpcLoading(false);

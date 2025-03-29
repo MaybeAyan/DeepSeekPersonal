@@ -81,12 +81,6 @@ export function MessageList({
     if (a.created_at && b.created_at) {
       return a.created_at - b.created_at;
     }
-
-    // 最后按id排序（确保稳定排序）
-    if (a.id && b.id) {
-      return a.id.localeCompare(b.id);
-    }
-
     return 0;
   });
 
@@ -176,13 +170,6 @@ function MessageItem({
 
   const { sender, content, showAvatar, botId } = parseMessageContent();
   const avatarUrl = !isUser ? botAvatars[botId] : '';
-
-  console.log('渲染消息:', {
-    id: message.id,
-    content: message.content.substring(0, 20) + '...',
-    isThinking: !!message.isThinking,
-    isUser: isUser,
-  });
 
   return (
     <Box mb={8}>

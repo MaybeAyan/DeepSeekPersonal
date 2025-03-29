@@ -5,21 +5,32 @@ import { ChatMessage } from '../../../types';
 
 export function useNpcChat() {
   const [npcConversationId, setNpcConversationId] = useState<string>('');
-  const [npcMessages, setNpcMessages] = useState<
-    Array<ChatMessage>
-  >([]);
+  const [npcMessages, setNpcMessages] = useState<Array<ChatMessage>>([]);
   const [npcLoading, setNpcLoading] = useState(false);
   const [npcError, setNpcError] = useState<string | null>(null);
   const abortControllerRef = useRef<() => void | null>(null);
 
   const { userId } = useUser();
 
+  const normalizeTimestamp = (timestamp: number | undefined): number => {
+    if (!timestamp) return Date.now();
+    const timestampStr = timestamp.toString();
+    if (timestampStr.length === 10) {
+      return timestamp * 1000;
+    }
+    return timestamp;
+  };
+
   const handleSendToNpc = useCallback(
     async (
       content: string,
       botId: string,
       conversationId: string,
-      onMessageUpdate?: (content: string, isCompleted: boolean, allMessages?: Array<ChatMessage>) => void
+      onMessageUpdate?: (
+        content: string,
+        isCompleted: boolean,
+        allMessages?: Array<ChatMessage>
+      ) => void
     ) => {
       if (npcLoading) return;
 
@@ -30,37 +41,29 @@ export function useNpcChat() {
 
       // 添加用户消息
       const userMessageId = uuidv4();
+      const userMessageTime = Date.now();
       const userMessage = {
         id: userMessageId,
         content,
         role: 'user' as const,
-        created_at: Date.now(),
+        created_at: userMessageTime,
       };
 
-      // 添加思考中消息
-      const thinkingMessageId = uuidv4();
-      const thinkingMessage = {
-        id: thinkingMessageId,
-        content: '正在思考中...',
-        role: 'assistant' as const,
-        created_at: Date.now() + 1, // 确保排在用户消息之后
-        isThinking: true,
-        bot_id: botId,
-      };
-
-      setNpcMessages((prev) => [...prev, userMessage, thinkingMessage]);
+      setNpcMessages((prev) => [...prev, userMessage]);
       setNpcLoading(true);
 
       let eventSource: EventSource | null = null;
-      let hasReceivedFirstMessage = false; // 使用变量而不是常量
 
       // 用于跟踪消息状态
-      const messageTrackers = new Map<string, {
-        id: string,
-        botId: string,
-        content: string,
-        created_at: number,
-      }>();
+      const messageTrackers = new Map<
+        string,
+        {
+          id: string;
+          botId: string;
+          content: string;
+          created_at: number;
+        }
+      >();
 
       try {
         const url = `http://192.168.10.70:10010/ai-npc/npc/streamChat/create?content=${encodeURIComponent(
@@ -81,46 +84,46 @@ export function useNpcChat() {
 
                 // 检查是否包含角色标识符 (例如 "李星云Ⅲ...")
                 if (delta.includes('Ⅲ') && delta.split('Ⅲ')[0].length < 15) {
-                  // 收到第一条真实消息，需要移除思考中占位符
-                  if (!hasReceivedFirstMessage) {
-                    hasReceivedFirstMessage = true;
-                  }
-
                   // 这是一个新角色的消息
                   const parts = delta.split('Ⅲ');
                   const botName = parts[0];
-                  const messageContent = parts.slice(1).join('Ⅲ');
 
                   // 创建新消息ID
-                  const newMessageId = uuidv4();
+                  const newMessageId = eventData.message.id || uuidv4();
                   const currentBotId = eventData.message.bot_id || botId;
-                  // 使用后端返回的created_at或当前时间
-                  const messageTime = eventData.message.created_at || Date.now();
+
+                  // 统一时间戳格式 - 确保与用户消息时间戳格式相同
+                  // 同时确保机器人消息总是在用户消息之后显示
+                  const serverTime = eventData.message.created_at;
+                  const normalizedTime = normalizeTimestamp(serverTime);
+                  const messageTime = Math.max(
+                    normalizedTime,
+                    userMessageTime + 100
+                  );
 
                   // 保存消息跟踪信息
                   messageTrackers.set(botName, {
                     id: newMessageId,
                     botId: currentBotId,
                     content: delta,
-                    created_at: messageTime
+                    created_at: messageTime,
                   });
 
-                  // 添加新消息到列表，同时移除思考中消息
-                  setNpcMessages(prev => {
-                    // 过滤掉思考中的消息
-                    const filteredMessages = hasReceivedFirstMessage
-                      ? prev.filter(msg => !msg.isThinking)
-                      : prev;
-
-                    const updatedMessages = [...filteredMessages, {
-                      id: newMessageId,
-                      content: delta,
-                      role: 'assistant' as const,
-                      bot_id: currentBotId,
-                      created_at: messageTime,
-                    }];
+                  // 添加新消息到列表
+                  setNpcMessages((prev) => {
+                    const updatedMessages = [
+                      ...prev,
+                      {
+                        id: newMessageId,
+                        content: delta,
+                        role: 'assistant' as const,
+                        bot_id: currentBotId,
+                        created_at: messageTime,
+                      },
+                    ];
 
                     const sortedMessages = sortMessages(updatedMessages);
+                    console.log('更新后的消息列表:', sortedMessages);
 
                     // 通知前端有新消息，并传递完整的消息列表
                     if (onMessageUpdate) {
@@ -132,21 +135,25 @@ export function useNpcChat() {
                 } else {
                   // 需要找到此增量内容属于哪个角色的消息
                   const allBotNames = Array.from(messageTrackers.keys());
-                  const matchedBotName = allBotNames.find(name => delta.startsWith(name));
+                  const matchedBotName = allBotNames.find((name) =>
+                    delta.startsWith(name)
+                  );
 
                   if (matchedBotName) {
                     // 找到匹配的角色，更新其消息
                     const tracker = messageTrackers.get(matchedBotName);
                     if (tracker) {
-                      const updatedContent = tracker.content + delta.substring(matchedBotName.length);
+                      const updatedContent =
+                        tracker.content +
+                        delta.substring(matchedBotName.length);
                       messageTrackers.set(matchedBotName, {
                         ...tracker,
-                        content: updatedContent
+                        content: updatedContent,
                       });
 
                       // 更新消息内容
-                      setNpcMessages(prev => {
-                        const updatedMessages = prev.map(msg =>
+                      setNpcMessages((prev) => {
+                        const updatedMessages = prev.map((msg) =>
                           msg.id === tracker.id
                             ? { ...msg, content: updatedContent }
                             : msg
@@ -156,27 +163,32 @@ export function useNpcChat() {
 
                         // 通知前端更新消息内容
                         if (onMessageUpdate) {
-                          onMessageUpdate(updatedContent, false, sortedMessages);
+                          onMessageUpdate(
+                            updatedContent,
+                            false,
+                            sortedMessages
+                          );
                         }
 
                         return sortedMessages;
                       });
                     }
                   } else if (messageTrackers.size > 0) {
-                    // 如果不能确定是哪个角色的消息，尝试查找最后一个创建的消息
-                    const lastBotName = Array.from(messageTrackers.keys()).pop();
+                    const lastBotName = Array.from(
+                      messageTrackers.keys()
+                    ).pop();
                     if (lastBotName) {
                       const tracker = messageTrackers.get(lastBotName);
                       if (tracker) {
                         const updatedContent = tracker.content + delta;
                         messageTrackers.set(lastBotName, {
                           ...tracker,
-                          content: updatedContent
+                          content: updatedContent,
                         });
 
                         // 更新消息内容
-                        setNpcMessages(prev => {
-                          const updatedMessages = prev.map(msg =>
+                        setNpcMessages((prev) => {
+                          const updatedMessages = prev.map((msg) =>
                             msg.id === tracker.id
                               ? { ...msg, content: updatedContent }
                               : msg
@@ -187,7 +199,11 @@ export function useNpcChat() {
 
                           // 通知前端更新消息内容
                           if (onMessageUpdate) {
-                            onMessageUpdate(updatedContent, false, sortedMessages);
+                            onMessageUpdate(
+                              updatedContent,
+                              false,
+                              sortedMessages
+                            );
                           }
 
                           return sortedMessages;
@@ -207,10 +223,9 @@ export function useNpcChat() {
                 setNpcLoading(false);
                 abortControllerRef.current = null;
 
-                // 获取最终的消息列表，移除思考中消息
-                setNpcMessages(prev => {
-                  const filteredMessages = prev.filter(msg => !msg.isThinking);
-                  const sortedMessages = sortMessages(filteredMessages);
+                // 获取最终的消息列表
+                setNpcMessages((prev) => {
+                  const sortedMessages = sortMessages(prev);
 
                   // 通知前端所有消息都已完成
                   if (onMessageUpdate) {
@@ -231,33 +246,28 @@ export function useNpcChat() {
           if (eventSource) {
             eventSource.close();
             setNpcLoading(false);
-
-            // 移除思考中消息
-            setNpcMessages(prev => prev.filter(msg => !msg.isThinking));
           }
         };
       } catch (error: any) {
         setNpcError(error.message || '请求失败');
         setNpcLoading(false);
-
-        // 发生错误时也要移除思考中消息
-        setNpcMessages(prev => prev.filter(msg => !msg.isThinking));
       }
     },
     [userId, npcLoading, setNpcError, setNpcMessages, setNpcLoading]
   );
 
-  // 修改排序函数，只依赖created_at
+  // （旧消息在前，新消息在后）
   const sortMessages = (messages: ChatMessage[]) => {
     return [...messages].sort((a, b) => {
-      // 排序主要依赖created_at时间戳
-      if (a.created_at && b.created_at) {
-        return a.created_at - b.created_at;
+      const timeA = a.created_at || 0;
+      const timeB = b.created_at || 0;
+      if (timeA === timeB) {
+        return a.role === 'user' ? -1 : 1;
       }
-      // 兜底排序，防止没有时间戳的情况
-      return 0;
+      return timeA - timeB;
     });
   };
+
   const handleStopNpcGeneration = useCallback(() => {
     if (abortControllerRef.current) {
       abortControllerRef.current();

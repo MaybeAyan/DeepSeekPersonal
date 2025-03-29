@@ -25,7 +25,7 @@ export const ChatInput: FC<ChatInputProps> = ({
 
   const handleSend = () => {
     if (input.trim() && !isLoading) {
-      onSendMessage('玩家|' + input.trim());
+      onSendMessage('玩家Ⅲ' + input.trim());
       setInput('');
       // 发送后聚焦输入框
       setTimeout(() => inputRef.current?.focus(), 0);

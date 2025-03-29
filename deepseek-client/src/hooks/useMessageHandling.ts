@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { ChatMessage, Conversation } from '../types';
 import { v4 as uuidv4 } from 'uuid';
+import { Message } from '../api';
 
 interface UseMessageHandlingProps {
   activeConversation: Conversation | null;
@@ -9,9 +10,13 @@ interface UseMessageHandlingProps {
     content: string,
     botId: string,
     conversationId: string,
-    onUpdate?: (content: string, isCompleted: boolean) => void
+    onUpdate?: (
+      content: string,
+      isCompleted: boolean,
+      allMessages?: Array<{ id: string; content: string; role: 'user' | 'assistant'; bot_id?: string }>
+    ) => void
   ) => void;
-  initialMessages?: ChatMessage[]; // 接收初始消息
+  initialMessages?: ChatMessage[];
 }
 
 export function useMessageHandling({
@@ -50,7 +55,7 @@ export function useMessageHandling({
     messagesRef.current = messages;
   }, [messages]);
 
-  // 处理消息发送
+  // 在handleSendMessage函数中修改处理消息的部分
   const handleSendMessage = useCallback(
     async (content: string) => {
       if (
@@ -63,7 +68,7 @@ export function useMessageHandling({
         return;
       }
 
-      // 创建用户消息和占位符助手消息
+      // 创建用户消息
       const userMessage: ChatMessage = {
         id: uuidv4(),
         role: 'user',
@@ -72,18 +77,8 @@ export function useMessageHandling({
         bot_id: '',
       };
 
-      const assistantMessageId = uuidv4();
-      const assistantMessage: ChatMessage = {
-        id: assistantMessageId,
-        role: 'assistant',
-        content: '思考中...',
-        created_at: Date.now(),
-        bot_id: selectedBot,
-        isThinking: true,
-      };
-
-      // 更新消息列表
-      setMessages((prev) => [...prev, userMessage, assistantMessage]);
+      // 只添加用户消息，不预先添加助手消息
+      setMessages((prev) => [...prev, userMessage]);
       setIsLoading(true);
 
       // 发送消息并处理响应
@@ -91,24 +86,37 @@ export function useMessageHandling({
         content,
         selectedBot,
         activeConversation.id,
-        (newContent, isCompleted) => {
+        (newContent, isCompleted, allMessages) => {
           if (isCompleted) {
+            // 流式响应完成
             setIsLoading(false);
-            setMessages((prev) => {
-              const updatedMessages = prev.map((msg) =>
-                msg.id === assistantMessageId
-                  ? {
-                      ...msg,
-                      content: newContent,
-                      fullContent: newContent,
-                      isThinking: false,
-                    }
-                  : msg
-              );
 
-              // 启动打字机效果
-              startTypewriterEffect(assistantMessageId, newContent);
-              return updatedMessages;
+            // 如果有完整的消息列表，用它替换当前消息列表中的所有助手消息
+            if (allMessages) {
+              setMessages((prev) => {
+                // 保留用户消息
+                const userMessages = prev.filter(msg => msg.role === 'user');
+
+                // 从allMessages中获取助手消息
+                const assistantMessages = allMessages.filter(msg => msg.role === 'assistant');
+
+                // 合并用户消息和最新的助手消息
+                return [...userMessages, ...assistantMessages];
+              });
+            }
+          } else if (allMessages) {
+            setMessages((prev) => {
+              // 保留用户消息
+              const userMessages = prev.filter(msg => msg.role === 'user');
+
+              // 从allMessages中获取助手消息
+              const assistantMessages = allMessages.filter(msg => msg.role === 'assistant');
+
+              // 合并用户消息和最新的助手消息
+              const combinedMessages = [...userMessages, ...assistantMessages];
+
+              // 按时间/序列号排序
+              return sortMessages(combinedMessages);
             });
           }
         }
@@ -117,6 +125,19 @@ export function useMessageHandling({
     [isLoading, activeConversation, selectedBot, sendMessageToNpc]
   );
 
+  const sortMessages = (messages: ChatMessage[]) => {
+    return [...messages].sort((a, b) => {
+      if (a.created_at && b.created_at) {
+        return a.created_at - b.created_at;
+      }
+
+      if (a.id && b.id) {
+        return a.id.localeCompare(b.id);
+      }
+      return 0;
+    });
+  };
+
   // 打字机效果
   const startTypewriterEffect = useCallback(
     (messageId: string, fullContent: string) => {
@@ -124,10 +145,12 @@ export function useMessageHandling({
       let displayedContent = '';
 
       // 检查内容是否包含分隔符
-      if (fullContent.includes('|')) {
-        const parts = fullContent.split('|');
-        const prefix = parts[0] + '|';
-        const actualContent = parts.slice(1).join('|');
+      if (fullContent.includes('III')) {
+        const parts = fullContent.split('III');
+        const prefix = parts[0] + 'III';
+        const actualContent = parts.slice(1).join('III');
+
+        console.log('分隔符检测到，前缀:', prefix, '实际内容:', actualContent);
 
         let currentIndex = 0;
         displayedContent = prefix;

@@ -52,7 +52,18 @@ export function ChatPage({
         colorScheme={colorScheme}
         onLogout={onLogout}
         sendMessageToNpc={(content, botId, conversationId, onUpdate) => {
-          handleSendToNpc(content, botId, conversationId, onUpdate);
+          // 这里不需要做额外处理，直接传递allMessages参数给onUpdate
+          handleSendToNpc(
+            content,
+            botId,
+            conversationId,
+            (content, isCompleted, allMessages) => {
+              if (onUpdate) {
+                // 将完整消息列表传递给onUpdate回调
+                onUpdate(content, isCompleted, allMessages);
+              }
+            }
+          );
         }}
         stopNpcGeneration={handleStopNpcGeneration}
         settings={settings}

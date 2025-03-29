@@ -1,4 +1,4 @@
-import { useRef, useEffect, useMemo, useState } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import {
   Paper,
   ScrollArea,
@@ -7,8 +7,6 @@ import {
   Avatar,
   Box,
   Flex,
-  Center,
-  Loader,
 } from '@mantine/core';
 import type { ChatMessage as ChatMessageType } from '../../types';
 import { IconRobot, IconUser } from '@tabler/icons-react';
@@ -22,34 +20,6 @@ interface MessageListProps {
   botNames?: Record<string, string>;
   nameToIdMap?: Record<string, string>;
 }
-
-// 添加消息去重处理函数
-const getDeduplicatedMessages = (messages: ChatMessageType[]) => {
-  const result: ChatMessageType[] = [];
-
-  for (let i = 0; i < messages.length; i++) {
-    const currentMsg = messages[i];
-
-    // 检查是否是用户消息以及下一条是否存在
-    if (currentMsg.role === 'user' && i + 1 < messages.length) {
-      const nextMsg = messages[i + 1];
-
-      // 如果下一条也是用户消息，且内容相同，跳过当前消息
-      if (nextMsg.role === 'user' && nextMsg.content === currentMsg.content) {
-        // 如果时间间隔小于30秒，认为是重复消息
-        const timeDiff =
-          (nextMsg.created_at || 0) - (currentMsg.created_at || 0);
-        if (timeDiff < 30000) {
-          continue;
-        }
-      }
-    }
-
-    result.push(currentMsg);
-  }
-
-  return result;
-};
 
 export function MessageList({
   messages,
@@ -74,33 +44,24 @@ export function MessageList({
 
   const scrollToBottom = (smooth = false) => {
     if (!scrollRef.current) return;
-
-    // 使用带有选项的scrollTo方法实现平滑滚动
     scrollRef.current.scrollTo({
       top: scrollRef.current.scrollHeight,
       behavior: smooth ? 'smooth' : 'auto',
     });
   };
 
-  // 自动滚动到底部
   useEffect(() => {
-    // 如果是初次加载或已滚动到底部或消息数增加，则滚动到底部
     if (
       isInitialRender ||
       isScrolledToBottom ||
       messages.length > prevMessagesLength
     ) {
-      // 对新会话使用即时滚动，对同一会话的新消息使用平滑滚动
       const shouldUseSmooth =
         !isInitialRender &&
         prevMessagesLength > 0 &&
         messages.length - prevMessagesLength <= 2;
-
-      // 使用requestAnimationFrame确保DOM更新后再滚动
       requestAnimationFrame(() => {
         scrollToBottom(shouldUseSmooth);
-
-        // 只在第一次渲染后将初始渲染标志设为false
         if (isInitialRender) {
           setIsInitialRender(false);
         }
@@ -112,18 +73,22 @@ export function MessageList({
   }, [messages, isScrolledToBottom, isInitialRender, prevMessagesLength]);
 
   // 检查是否显示发送者信息
-  const shouldShowSender = (
-    message: ChatMessageType,
-    index: number,
-    messages: ChatMessageType[]
-  ) => {
+  const shouldShowSender = (message: ChatMessageType, index: number) => {
     return true;
   };
 
-  const deduplicatedMessages = useMemo(
-    () => getDeduplicatedMessages(messages),
-    [messages]
-  );
+  const sortedMessages = [...messages].sort((a, b) => {
+    if (a.created_at && b.created_at) {
+      return a.created_at - b.created_at;
+    }
+
+    // 最后按id排序（确保稳定排序）
+    if (a.id && b.id) {
+      return a.id.localeCompare(b.id);
+    }
+
+    return 0;
+  });
 
   return (
     <ScrollArea
@@ -133,13 +98,13 @@ export function MessageList({
       onScrollPositionChange={handleScroll}
     >
       <Stack gap="xs" p="sm">
-        {deduplicatedMessages.map((message, index) => (
+        {sortedMessages.map((message, index) => (
           <MessageItem
             key={message.id}
             message={message}
             isDark={isDark}
             customRenderer={customRenderer}
-            showSender={shouldShowSender(message, index, deduplicatedMessages)}
+            showSender={shouldShowSender(message, index)}
             botAvatars={botAvatars}
             botNames={botNames}
             nameToIdMap={nameToIdMap}
@@ -149,20 +114,6 @@ export function MessageList({
     </ScrollArea>
   );
 }
-
-// 创建思考中动画组件
-const ThinkingAnimation = ({ isDark }: { isDark: boolean }) => {
-  return (
-    <Center>
-      <Loader
-        size="sm"
-        color={isDark ? 'gray.5' : 'blue.5'}
-        type="dots"
-        style={{ marginRight: 8 }}
-      />
-    </Center>
-  );
-};
 
 function MessageItem({
   message,
@@ -196,19 +147,18 @@ function MessageItem({
     if (isThinking) {
       return {
         sender: '',
-        // 可配置
         content: '...',
         showAvatar: true,
         botId: originalBotId,
       };
     }
 
-    if (content.includes('|')) {
-      const parts = content.split('|');
+    if (content.includes('Ⅲ')) {
+      const parts = content.split('Ⅲ');
       const senderName = parts[0].trim();
       return {
         sender: senderName,
-        content: parts.slice(1).join('|').trim(),
+        content: parts.slice(1).join('Ⅲ').trim(),
         showAvatar: true,
         botId: nameToIdMap[senderName],
       };
@@ -226,6 +176,13 @@ function MessageItem({
 
   const { sender, content, showAvatar, botId } = parseMessageContent();
   const avatarUrl = !isUser ? botAvatars[botId] : '';
+
+  console.log('渲染消息:', {
+    id: message.id,
+    content: message.content.substring(0, 20) + '...',
+    isThinking: !!message.isThinking,
+    isUser: isUser,
+  });
 
   return (
     <Box mb={8}>

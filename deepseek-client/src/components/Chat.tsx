@@ -63,7 +63,16 @@ interface ChatProps {
     content: string,
     botId: string,
     conversationId: string,
-    onUpdate?: (content: string, isCompleted: boolean) => void
+    onUpdate?: (
+      content: string,
+      isCompleted: boolean,
+      allMessages?: Array<{
+        id: string;
+        content: string;
+        role: 'user' | 'assistant';
+        bot_id?: string;
+      }>
+    ) => void
   ) => void;
   stopNpcGeneration?: () => void;
 }
